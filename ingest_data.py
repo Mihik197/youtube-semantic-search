@@ -2,23 +2,19 @@
 import sys
 import config
 import pandas as pd
-import os # Needed for checking file existence
-import json # Needed for saving/loading intermediate data
+import os
+import json
 
-from youtube_utils import fetch_youtube_details
 from embedding_utils import (
     initialize_gemini_client,
     generate_embeddings,
-    store_embeddings_in_chroma
-)
-# Assuming shared functions are still in main_search or moved to common_utils
-from main_search import (
+    store_embeddings_in_chroma,
+    prepare_text_documents,
     initialize_chromadb_client,
     load_video_ids_from_csv,
-    prepare_text_documents
+    fetch_youtube_details,
 )
 
-# Helper function to save data to JSON
 def save_to_json(data, filename):
     print(f"Saving intermediate data to {filename}...")
     try:
@@ -28,7 +24,6 @@ def save_to_json(data, filename):
     except Exception as e:
         print(f"Error saving data to {filename}: {e}")
 
-# Helper function to load data from JSON
 def load_from_json(filename):
     print(f"Attempting to load intermediate data from {filename}...")
     if os.path.exists(filename):
@@ -49,15 +44,12 @@ def run_ingestion():
     """Handles the full data ingestion pipeline with intermediate saving/loading."""
     print("--- Running Data Ingestion Pipeline (with Intermediate Saving) ---")
 
-    # 1. Validate Configuration
     if not config.IS_CONFIG_VALID:
         print("Configuration is invalid. Please check settings and file paths.")
         return False
 
     # --- Initialize required clients ---
-    # Gemini client needed for embedding phase
     gemini_client = None
-    # Chroma client needed for storage phase
     chroma_client = None
     chroma_collection = None
 
@@ -107,7 +99,6 @@ def run_ingestion():
     metadata_map = {doc['id']: doc['metadata'] for doc in documents_to_embed}
 
 
-    # --- Phase 4: Generating/Loading Embeddings ---
     print("\n--- Phase 4: Generating/Loading Embeddings ---")
     embeddings_data = load_from_json(config.EMBEDDINGS_DATA_FILE)
     embeddings = None

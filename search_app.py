@@ -1,13 +1,9 @@
 # search_app.py
 import sys
 import config
-from embedding_utils import initialize_gemini_client
+from embedding_utils import initialize_gemini_client, initialize_chromadb_client
 from google.genai import types
-# Assuming shared functions are still in main_search or moved to common_utils
-from main_search import (
-    initialize_chromadb_client,
-    # search_videos # Remove this if defined below
-)
+
 
 # Define search_videos locally or import if kept elsewhere
 def search_videos_local(query, gemini_client, chroma_collection, n_results=config.DEFAULT_SEARCH_RESULTS):

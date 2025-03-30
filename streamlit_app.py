@@ -1,8 +1,7 @@
 # streamlit_app.py
 import streamlit as st
 import config
-from embedding_utils import initialize_gemini_client
-from main_search import initialize_chromadb_client
+from embedding_utils import initialize_gemini_client, initialize_chromadb_client
 from search_app import search_videos_local as search_videos
 
 # --- Page Configuration ---
