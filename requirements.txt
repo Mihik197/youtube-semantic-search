@@ -1,0 +1,7 @@
+pandas
+google-api-python-client
+google-genai
+chromadb
+tqdm
+python-dotenv
+streamlit
