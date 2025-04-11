@@ -5,3 +5,4 @@ chromadb
 tqdm
 python-dotenv
 streamlit
+flask
