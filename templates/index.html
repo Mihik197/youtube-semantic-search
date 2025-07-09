@@ -86,10 +86,7 @@
 								<div
 									class="small {% if collection_empty %}text-dark{% else %}text-white{% endif %} opacity-75"
 								>
-									{% if collection_empty %} Please run
-									ingestion script first {% else %} All videos
-									indexed and ready to search {% endif %}
-								</div>
+									{% if collection_empty %}{{ "Please run ingestion script first" | trim }}{% else %}{{ "All videos indexed and ready to search" | trim }}{% endif %}
 							</div>
 
 							<div class="small text-muted p-2">
