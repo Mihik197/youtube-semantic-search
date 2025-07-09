@@ -5,7 +5,6 @@ A semantic search engine for your YouTube 'Watch Later' list. This project uses 
 ![Search Interface](images/image.png)
 ![Search Results](images/image-1.png)
 ![Video Details](images/image-2.png)
-![Dark Mode](images/image-3.png)
 
 ## Features
 
