@@ -60,9 +60,11 @@ def search():
             'id': video_id,
             'title': meta.get('title', 'N/A'),
             'channel': meta.get('channel', 'N/A'),
+            'channel_id': meta.get('channel_id'),
             'url': meta.get('url', '#'),
             'score': float(score),  # Ensure score is JSON serializable
             'thumbnail': f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg" if video_id else None,
+            'channel_thumbnail': meta.get('channel_thumbnail'),
             'tags': meta.get('tags_str', ''),
             'document': documents[i] if i < len(documents) else "N/A",
             'metadata': meta
@@ -127,9 +129,11 @@ def channel_videos():
                 'id': vid,
                 'title': v.get('title', 'N/A'),
                 'channel': v.get('channel', channel),
+                'channel_id': v.get('channel_id'),
                 'url': v.get('url', f'https://www.youtube.com/watch?v={vid}' if vid else '#'),
                 'score': 0.0,
                 'thumbnail': f"https://img.youtube.com/vi/{vid}/hqdefault.jpg" if vid else None,
+                'channel_thumbnail': v.get('channel_thumbnail'),
                 'tags': v.get('tags_str', ''),
                 'document': v.get('document', ''),
                 'metadata': v

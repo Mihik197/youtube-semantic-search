@@ -196,3 +196,207 @@ class VectorDBService:
                     if len(result) >= limit:
                         break
             return result
+
+    # --- Enrichment / Maintenance Helpers ---
+    def get_items(self, ids: List[str]) -> dict[str, dict]:
+        """Retrieve existing items (embeddings, metadatas, documents) for given IDs.
+
+        Batches requests to avoid underlying client edge cases. Returns mapping id ->
+        { 'embedding': [...], 'metadata': {...}, 'document': str }
+        Missing IDs are skipped.
+        """
+        if not ids:
+            return {}
+        out: dict[str, dict] = {}
+        try:
+            batch_size = getattr(config, 'CHROMA_BATCH_SIZE', 100) if 'config' in globals() else 100
+        except Exception:
+            batch_size = 100
+        for i in range(0, len(ids), batch_size):
+            subset = ids[i:i+batch_size]
+            try:
+                batch = self.collection.get(ids=subset, include=['embeddings', 'metadatas', 'documents'])
+                got_ids = batch.get('ids', []) or []
+                mets = batch.get('metadatas', []) or []
+                embs = batch.get('embeddings', []) or []
+                docs = batch.get('documents', []) or []
+                for j, vid in enumerate(got_ids):
+                    out[vid] = {
+                        'embedding': embs[j] if j < len(embs) else None,
+                        'metadata': mets[j] if j < len(mets) else {},
+                        'document': docs[j] if j < len(docs) else ''
+                    }
+            except Exception as e:
+                print(f"Warning: failed to retrieve batch of items ({len(subset)} ids) - {e}")
+        return out
+
+    def update_metadatas(self, updates: dict[str, dict]) -> tuple[int, int]:
+        """Merge and update metadata for existing IDs.
+
+        Args:
+            updates: mapping id -> partial metadata to merge into existing.
+        Returns:
+            (updated_count, skipped_missing)
+        """
+        if not updates:
+            return 0, 0
+        ids = list(updates.keys())
+        existing = self.get_items(ids)
+        to_upsert_ids: list[str] = []
+        to_upsert_embeddings: list[list] = []
+        to_upsert_metadatas: list[dict] = []
+        to_upsert_documents: list[str] = []
+        skipped = 0
+        for vid in ids:
+            item = existing.get(vid)
+            if not item:
+                skipped += 1
+                continue
+            merged_meta = item['metadata'].copy() if isinstance(item['metadata'], dict) else {}
+            patch = updates[vid] or {}
+            merged_meta.update({k: v for k, v in patch.items() if v is not None})
+            to_upsert_ids.append(vid)
+            to_upsert_embeddings.append(item['embedding'])
+            to_upsert_metadatas.append(merged_meta)
+            to_upsert_documents.append(item['document'])
+        if to_upsert_ids:
+            try:
+                self.collection.upsert(
+                    ids=to_upsert_ids,
+                    embeddings=to_upsert_embeddings,
+                    metadatas=to_upsert_metadatas,
+                    documents=to_upsert_documents
+                )
+            except Exception as e:
+                print(f"Error during metadata update upsert: {e}")
+                return 0, len(ids)
+        return len(to_upsert_ids), skipped
+
+    def bulk_update_metadatas(self, updates: dict[str, dict], batch_size: int | None = None) -> tuple[int, int]:
+        """Efficiently apply metadata patches by scanning collection once.
+
+        This avoids repeated per-ID get calls (which caused ambiguous truth value errors
+        with some underlying client array types). We stream through all records in batches,
+        merging only those in the updates dict. Embeddings and documents are preserved.
+
+        Args:
+            updates: mapping id -> partial metadata patch
+            batch_size: override batch size (defaults to CHROMA_BATCH_SIZE or 100)
+        Returns:
+            (updated, skipped_missing)
+        """
+        if not updates:
+            return 0, 0
+        try:
+            if batch_size is None:
+                batch_size = getattr(config, 'CHROMA_BATCH_SIZE', 100)
+        except Exception:
+            batch_size = 100
+        total = self.count()
+        if total == 0:
+            return 0, 0
+        updated = 0
+        skipped_missing = 0
+        offset = 0
+        while offset < total:
+            try:
+                batch = self.collection.get(
+                    include=['metadatas', 'embeddings', 'documents'],
+                    offset=offset,
+                    limit=min(batch_size, total - offset)
+                )
+            except Exception as e:
+                print(f"Error retrieving batch at offset {offset}: {e}")
+                break
+            ids = batch.get('ids', [])
+            if ids is None:
+                ids = []
+            mets = batch.get('metadatas', [])
+            if mets is None:
+                mets = []
+            embs = batch.get('embeddings', [])
+            if embs is None:
+                embs = []
+            docs = batch.get('documents', [])
+            if docs is None:
+                docs = []
+            if not ids:
+                break
+            to_update_ids = []
+            to_update_embs = []
+            to_update_metas = []
+            to_update_docs = []
+            for i, vid in enumerate(ids):
+                if vid in updates:
+                    base_meta = mets[i] if i < len(mets) and isinstance(mets[i], dict) else {}
+                    patch = updates[vid] or {}
+                    merged = base_meta.copy()
+                    merged.update({k: v for k, v in patch.items() if v is not None})
+                    to_update_ids.append(vid)
+                    to_update_embs.append(embs[i] if i < len(embs) else None)
+                    to_update_metas.append(merged)
+                    to_update_docs.append(docs[i] if i < len(docs) else '')
+            if to_update_ids:
+                try:
+                    self.collection.upsert(
+                        ids=to_update_ids,
+                        embeddings=to_update_embs,
+                        metadatas=to_update_metas,
+                        documents=to_update_docs
+                    )
+                    updated += len(to_update_ids)
+                except Exception as e:
+                    print(f"Error upserting metadata batch (offset {offset}): {e}")
+            offset += len(ids)
+        # Compute skipped_missing as those update keys never encountered
+        skipped_missing = len([k for k in updates.keys() if k not in self.collection.get(ids=list(updates.keys()), include=[]).get('ids', [])])
+        return updated, skipped_missing
+
+    def patch_metadatas(self, updates: dict[str, dict], batch_size: int | None = None) -> tuple[int, int]:
+        """Merge patches into existing metadatas using collection.update (no embedding fetch).
+
+        This avoids retrieving embeddings (source of ambiguous truth value errors) and is
+        sufficient when only adding new metadata keys.
+        """
+        if not updates:
+            return 0, 0
+        try:
+            if batch_size is None:
+                batch_size = getattr(config, 'CHROMA_BATCH_SIZE', 100)
+        except Exception:
+            batch_size = 100
+        ids_all = list(updates.keys())
+        updated = 0
+        skipped_missing = 0
+        for i in range(0, len(ids_all), batch_size):
+            subset = ids_all[i:i+batch_size]
+            try:
+                existing = self.collection.get(ids=subset, include=['metadatas'])
+            except Exception as e:
+                print(f"Warning: failed to fetch metadata batch for update ({len(subset)} ids): {e}")
+                skipped_missing += len(subset)
+                continue
+            got_ids = existing.get('ids', []) or []
+            existing_mets = existing.get('metadatas', []) or []
+            existing_map = {}
+            for j, vid in enumerate(got_ids):
+                base = existing_mets[j] if j < len(existing_mets) and isinstance(existing_mets[j], dict) else {}
+                existing_map[vid] = base
+            patch_ids = []
+            patch_metas = []
+            for vid in subset:
+                patch = updates.get(vid) or {}
+                if vid not in existing_map:
+                    skipped_missing += 1
+                    continue
+                merged = existing_map[vid].copy()
+                merged.update({k: v for k, v in patch.items() if v is not None})
+                patch_ids.append(vid)
+                patch_metas.append(merged)
+            if patch_ids:
+                try:
+                    self.collection.update(ids=patch_ids, metadatas=patch_metas)
+                    updated += len(patch_ids)
+                except Exception as e:
+                    print(f"Error applying metadata patch batch (size {len(patch_ids)}): {e}")
+        return updated, skipped_missing

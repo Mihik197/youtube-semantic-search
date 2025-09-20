@@ -51,6 +51,8 @@ class YouTubeService:
 
         print(f"Fetching details for {len(video_ids)} YouTube video IDs...")
 
+        channel_ids: set[str] = set()
+
         for i in tqdm(range(0, len(video_ids), config.YOUTUBE_API_BATCH_SIZE), desc="YouTube API Batches"):
             batch_ids = video_ids[i:i + config.YOUTUBE_API_BATCH_SIZE]
 
@@ -66,14 +68,18 @@ class YouTubeService:
                     snippet = item.get('snippet', {})
                     content_details = item.get('contentDetails', {})
                     video_id = item.get('id')
+                    channel_id = snippet.get('channelId') or None
                     
                     if video_id and snippet.get('title'):
                         returned_ids_in_batch.add(video_id)
+                        if channel_id:
+                            channel_ids.add(channel_id)
                         all_video_details.append({
                             'id': video_id,
                             'title': snippet.get('title'),
                             'description': snippet.get('description', ''),
                             'channel': snippet.get('channelTitle', ''),
+                            'channel_id': channel_id,
                             'tags': snippet.get('tags', []),
                             'publishedAt': snippet.get('publishedAt'),
                             'duration': content_details.get('duration'),  # ISO 8601 duration
@@ -111,5 +117,51 @@ class YouTubeService:
             print(f"Summary: {total_missing} of {len(requested_id_set)} requested IDs not returned by API.")
         else:
             self.last_missing_ids = []
+        # Enrich with channel thumbnails (batch fetch)
+        try:
+            if channel_ids:
+                channel_thumb_map = self.fetch_channel_thumbnails(list(channel_ids))
+                for v in all_video_details:
+                    cid = v.get('channel_id')
+                    if cid and cid in channel_thumb_map:
+                        v['channel_thumbnail'] = channel_thumb_map[cid]
+        except Exception as enrich_e:
+            print(f"Warning: Failed to enrich channel thumbnails: {enrich_e}")
+
         print(f"Finished fetching YouTube details. Processed: {processed_count}, Errors/Skipped: {error_count}")
         return all_video_details
+
+    def fetch_channel_thumbnails(self, channel_ids: list[str]) -> dict[str, str]:
+        """Fetch channel thumbnails for a list of channel IDs.
+
+        Uses channels.list (part=snippet). Returns mapping channelId -> thumbnail URL (prefers high > medium > default).
+        """
+        if not channel_ids:
+            return {}
+        result: dict[str, str] = {}
+        # Deduplicate & batch
+        unique_ids = list(dict.fromkeys([cid for cid in channel_ids if cid]))
+        for i in range(0, len(unique_ids), config.YOUTUBE_API_BATCH_SIZE):
+            batch = unique_ids[i:i + config.YOUTUBE_API_BATCH_SIZE]
+            try:
+                request = self.youtube.channels().list(part="snippet", id=",".join(batch))
+                response = request.execute()
+                for item in response.get('items', []):
+                    cid = item.get('id')
+                    snippet = item.get('snippet', {})
+                    thumbs = (snippet.get('thumbnails') or {}) if isinstance(snippet, dict) else {}
+                    # Preferred order: high, medium, default
+                    thumb_url = None
+                    for key in ('high', 'medium', 'default'):
+                        if key in thumbs and isinstance(thumbs[key], dict):
+                            thumb_url = thumbs[key].get('url')
+                            if thumb_url:
+                                break
+                    if cid and thumb_url:
+                        result[cid] = thumb_url
+                time.sleep(config.YOUTUBE_API_DELAY)
+            except HttpError as e:
+                print(f"Channel thumbnails HTTP error: {e}")
+            except Exception as e:
+                print(f"Unexpected error fetching channel thumbnails: {e}")
+        return result

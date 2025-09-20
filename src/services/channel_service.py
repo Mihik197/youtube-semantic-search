@@ -50,14 +50,19 @@ class ChannelAggregationService:
                 for m in metadatas:
                     try:
                         channel = self._normalize_channel(m.get('channel'))
+                        thumb = m.get('channel_thumbnail') or None
                         entry = counts.get(channel)
                         if entry is None:
                             counts[channel] = {
                                 'channel': channel,
                                 'count': 1,
+                                'channel_thumbnail': thumb
                             }
                         else:
                             entry['count'] += 1
+                            # If we don't yet have a thumbnail stored and this metadata has one, set it
+                            if not entry.get('channel_thumbnail') and thumb:
+                                entry['channel_thumbnail'] = thumb
                     except Exception as inner:
                         print(f"ChannelAggregationService warning: failed to process metadata item: {inner}")
                 channels_list: List[Dict[str, Any]] = []

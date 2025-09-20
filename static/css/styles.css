@@ -139,6 +139,9 @@ body {
 	margin: 0; /* remove default paragraph margin */
 	font-size: 0.85rem;
 	color: var(--text-medium);
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
 }
 
 .video-card .card-img-top {
@@ -324,6 +327,28 @@ body { overflow-y: scroll; }
 
 .channel-name { flex: 1 1 auto; }
 .channel-name.full { white-space: normal; overflow: visible; text-overflow: unset; }
+
+/* Channel avatars */
+.channel-avatar, .avatar-fallback {
+	width: 24px;
+	height: 24px;
+	border-radius: 50%;
+	object-fit: cover;
+	flex-shrink: 0;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 0.65rem;
+	font-weight: 600;
+	background: var(--avatar-bg, var(--bs-secondary-bg));
+	color: #fff;
+	box-shadow: 0 0 0 1px rgba(0,0,0,0.1);
+}
+.channel-list .channel-avatar, .channel-list .avatar-fallback { width: 20px; height: 20px; font-size: 0.55rem; }
+.channel-avatar-wrapper { display: inline-flex; align-items: center; margin-right: 0.4rem; }
+.channel-avatar-link { display: inline-flex; text-decoration: none; }
+.channel-avatar-link:hover .channel-avatar, .channel-avatar-link:focus .channel-avatar,
+.channel-avatar-link:hover .avatar-fallback, .channel-avatar-link:focus .avatar-fallback { box-shadow: 0 0 0 2px var(--primary-color); outline: none; }
 
 .channel-count {
 	font-weight: 500;

@@ -226,7 +226,10 @@ document.addEventListener("DOMContentLoaded", () => {
                         </div>
                         <div class="card-body">
                             <h5 class="card-title">${video.title}</h5>
-                            <p class="channel-name"><i class="bi bi-person-circle"></i> ${video.channel}</p>
+                                <p class="channel-name">
+                                    ${this.avatarImg(video)}
+                                    <span>${video.channel}</span>
+                                </p>
                         </div>
                         <div class="card-footer d-flex justify-content-between align-items-center">
                             <button class="btn btn-sm btn-outline-primary view-details" 
@@ -246,6 +249,32 @@ document.addEventListener("DOMContentLoaded", () => {
                     </div>`;
                 setTimeout(() => card.classList.add('visible'), 50 * index);
                 return card;
+            }
+            , avatarImg(video) {
+                const url = video.channel_thumbnail;
+                const safeName = App.Utils.escapeHtml(video.channel || '');
+                const channelId = video.channel_id;
+                const channelUrl = channelId ? `https://www.youtube.com/channel/${channelId}` : `https://www.youtube.com/results?search_query=${encodeURIComponent(video.channel || '')}`;
+                if (url) {
+                    return `<a href="${channelUrl}" target="_blank" class="channel-avatar-link" aria-label="Open ${safeName} channel on YouTube" rel="noopener">` +
+                        `<img src="${url}" class="channel-avatar" alt="${safeName} channel avatar" loading="lazy" onerror="this.onerror=null;this.replaceWith(App.Results.fallbackAvatar('${safeName}'));" />` +
+                        `</a>`;
+                }
+                return `<a href="${channelUrl}" target="_blank" class="channel-avatar-link" aria-label="Open ${safeName} channel on YouTube" rel="noopener">${this.fallbackAvatar(safeName)}</a>`;
+            }
+            , avatarImgPlain(video) { // Non-clickable version for channel list
+                const url = video.channel_thumbnail;
+                const safeName = App.Utils.escapeHtml(video.channel || '');
+                if (url) {
+                    return `<img src="${url}" class="channel-avatar" alt="${safeName} channel avatar" loading="lazy" onerror="this.onerror=null;this.replaceWith(App.Results.fallbackAvatar('${safeName}'));" />`;
+                }
+                return this.fallbackAvatar(safeName);
+            }
+            , fallbackAvatar(name) {
+                const letter = (name || '?').trim().charAt(0).toUpperCase() || '?';
+                const colors = ['#6f42c1','#d63384','#fd7e14','#20c997','#0d6efd','#6610f2','#198754','#e83e8c','#fd7e14','#0dcaf0'];
+                const color = colors[letter.charCodeAt(0) % colors.length];
+                return `<span class="channel-avatar avatar-fallback" style="--avatar-bg:${color}" aria-hidden="true">${letter}</span>`;
             }
         },
         Modal: {
@@ -461,6 +490,7 @@ document.addEventListener("DOMContentLoaded", () => {
                         li.setAttribute('tabindex', '0');
                         li.setAttribute('data-channel', ch.channel);
                         li.innerHTML = `
+                            <span class="channel-avatar-wrapper">${App.Results.avatarImgPlain({ channel: ch.channel, channel_thumbnail: ch.channel_thumbnail })}</span>
                             <span class="channel-name full">${App.Utils.escapeHtml(ch.channel)}</span>
                             <span class="badge bg-secondary-subtle text-secondary-emphasis channel-count" title="Saved videos for channel">${ch.count}</span>`;
                         li.addEventListener('click', () => this.select(li));
