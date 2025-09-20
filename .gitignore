@@ -35,6 +35,8 @@ venv.bak/
 Watch later-videos.csv
 intermediate_*.json
 gemini-docs/
+*.json
+*.jsonl
 
 # ChromaDB files
 chroma_watch_later_db/

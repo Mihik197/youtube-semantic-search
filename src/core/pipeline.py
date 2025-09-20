@@ -3,6 +3,7 @@ import pandas as pd
 from src.services.youtube_service import YouTubeService
 from src.services.embedding_service import EmbeddingService
 from src.services.vectordb_service import VectorDBService
+from src.services.deleted_videos_archive import archive_deleted_videos
 from src.config import (
     YOUTUBE_API_KEY,
     GEMINI_API_KEY,
@@ -46,6 +47,53 @@ class DataIngestionPipeline:
         if new_video_ids:
             print("\n--- Phase 4: Processing New Videos ---")
             video_details = self.youtube_service.fetch_video_details(new_video_ids)
+            # Diagnostic: report missing IDs not returned by API
+            missing_ids = getattr(self.youtube_service, 'last_missing_ids', [])
+            if missing_ids:
+                print(f"Diagnostic: {len(missing_ids)} of {len(new_video_ids)} new IDs not returned by YouTube API.")
+                sample_missing = missing_ids[:10]
+                print(f"Missing IDs sample (up to 10): {sample_missing}")
+                # Optionally write to a file for later inspection
+                try:
+                    import os, json, time as _time
+                    diagnostics_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '..', 'data')
+                    diagnostics_path = os.path.abspath(diagnostics_path)
+                    os.makedirs(diagnostics_path, exist_ok=True)
+                    out_file = os.path.join(diagnostics_path, f'missing_youtube_ids_{int(_time.time())}.json')
+                    with open(out_file, 'w', encoding='utf-8') as f:
+                        json.dump({
+                            'requested_new_ids': new_video_ids,
+                            'missing_ids': missing_ids,
+                            'missing_count': len(missing_ids)
+                        }, f, indent=2)
+                    print(f"Diagnostic: Missing ID list written to {out_file}")
+                except Exception as diag_e:
+                    print(f"Warning: Failed to write missing ID diagnostics file: {diag_e}")
+                # Attempt archival of deleted/private videos if we still have historical details
+                try:
+                    # Load existing intermediate details if present for archival
+                    import json, os
+                    intermediate_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '..', 'intermediate_youtube_details.json')
+                    intermediate_path = os.path.abspath(intermediate_path)
+                    historical_details = []
+                    if os.path.exists(intermediate_path):
+                        with open(intermediate_path, 'r', encoding='utf-8') as f:
+                            try:
+                                historical_details = json.load(f)
+                            except json.JSONDecodeError:
+                                print("Warning: Could not parse intermediate_youtube_details.json for archival.")
+                    if isinstance(historical_details, list) and historical_details:
+                        archive_summary = archive_deleted_videos(
+                            missing_ids,
+                            historical_details,
+                            source_reason='ingestion_missing',
+                            run_context={'new_video_ids_requested': len(new_video_ids)}
+                        )
+                        print("Archive: Archived {archived_new_records} new / {missing_input_count} missing IDs (already archived: {already_archived}).".format(**archive_summary))
+                    else:
+                        print("Archive: No historical details available to archive missing videos.")
+                except Exception as arch_e:
+                    print(f"Archive Warning: Failed to archive missing videos: {arch_e}")
             if video_details:
                 documents_to_embed = self._prepare_text_documents(video_details)
                 if documents_to_embed:
@@ -102,9 +150,33 @@ class DataIngestionPipeline:
                  print(f"Available columns: {df.columns.tolist()}")
                  return None
 
-            video_ids = df[id_column].dropna().unique().tolist()
-            print(f"Loaded {len(video_ids)} unique video IDs from column '{id_column}' in '{filepath}'.")
-            return set(video_ids)
+            raw_ids = df[id_column].dropna().astype(str).tolist()
+            cleaned_ids = []
+            invalid_ids = []
+            seen = set()
+
+            # YouTube video IDs are typically 11 chars (alphanumeric, -, _). We won't strictly enforce length
+            # (shorts or future changes) but we'll log irregular lengths.
+            import re
+            pattern = re.compile(r'^[A-Za-z0-9_-]{5,}$')  # relaxed lower bound to 5 to avoid over-filtering
+
+            for vid in raw_ids:
+                cleaned = vid.strip().strip('"').strip("'")
+                if not cleaned:
+                    continue
+                if cleaned in seen:
+                    continue
+                seen.add(cleaned)
+                if not pattern.match(cleaned):
+                    invalid_ids.append(cleaned)
+                cleaned_ids.append(cleaned)
+
+            if invalid_ids:
+                print(f"Note: {len(invalid_ids)} video IDs have unexpected characters/length and were still included. Sample: {invalid_ids[:5]}")
+
+            print(f"Loaded {len(cleaned_ids)} unique (cleaned) video IDs from column '{id_column}' in '{filepath}'.")
+            # Return as set for downstream set operations
+            return set(cleaned_ids)
 
         except FileNotFoundError:
             print(f"Error: CSV file not found at '{filepath}'")

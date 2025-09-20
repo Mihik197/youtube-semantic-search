@@ -46,7 +46,9 @@ class YouTubeService:
         all_video_details = []
         processed_count = 0
         error_count = 0
-        
+        requested_id_set = set(video_ids)
+        self.last_missing_ids = []  # will populate at end for external diagnostics
+
         print(f"Fetching details for {len(video_ids)} YouTube video IDs...")
 
         for i in tqdm(range(0, len(video_ids), config.YOUTUBE_API_BATCH_SIZE), desc="YouTube API Batches"):
@@ -59,12 +61,14 @@ class YouTubeService:
                 )
                 response = request.execute()
 
+                returned_ids_in_batch = set()
                 for item in response.get('items', []):
                     snippet = item.get('snippet', {})
                     content_details = item.get('contentDetails', {})
                     video_id = item.get('id')
                     
                     if video_id and snippet.get('title'):
+                        returned_ids_in_batch.add(video_id)
                         all_video_details.append({
                             'id': video_id,
                             'title': snippet.get('title'),
@@ -79,6 +83,12 @@ class YouTubeService:
                     else:
                         print(f"Warning: Skipping item with missing ID or Title. Data: {item}")
                         error_count += 1
+
+                # Detect IDs that were requested but not returned (private, deleted, invalid, region blocked, etc.)
+                missing_from_batch = set(batch_ids) - returned_ids_in_batch
+                if missing_from_batch:
+                    sample_list = list(missing_from_batch)[:5]
+                    print(f"Info: {len(missing_from_batch)} IDs in this batch not returned by API (possibly private/deleted/unavailable). Sample: {sample_list}")
                 
                 time.sleep(config.YOUTUBE_API_DELAY)
 
@@ -93,5 +103,13 @@ class YouTubeService:
                 print(f"\nUnexpected Error fetching batch: {e}")
                 error_count += len(batch_ids)
         
+        # Compute missing IDs overall (those not returned at all)
+        returned_overall = {d['id'] for d in all_video_details}
+        total_missing = len(requested_id_set - returned_overall)
+        if total_missing > 0:
+            self.last_missing_ids = sorted(list(requested_id_set - returned_overall))
+            print(f"Summary: {total_missing} of {len(requested_id_set)} requested IDs not returned by API.")
+        else:
+            self.last_missing_ids = []
         print(f"Finished fetching YouTube details. Processed: {processed_count}, Errors/Skipped: {error_count}")
         return all_video_details
