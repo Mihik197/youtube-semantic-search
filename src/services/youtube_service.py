@@ -54,13 +54,14 @@ class YouTubeService:
 
             try:
                 request = self.youtube.videos().list(
-                    part="snippet",
+                    part="snippet,contentDetails",
                     id=",".join(batch_ids)
                 )
                 response = request.execute()
 
                 for item in response.get('items', []):
                     snippet = item.get('snippet', {})
+                    content_details = item.get('contentDetails', {})
                     video_id = item.get('id')
                     
                     if video_id and snippet.get('title'):
@@ -70,6 +71,8 @@ class YouTubeService:
                             'description': snippet.get('description', ''),
                             'channel': snippet.get('channelTitle', ''),
                             'tags': snippet.get('tags', []),
+                            'publishedAt': snippet.get('publishedAt'),
+                            'duration': content_details.get('duration'),  # ISO 8601 duration
                             'url': f'https://www.youtube.com/watch?v={video_id}'
                         })
                         processed_count += 1
