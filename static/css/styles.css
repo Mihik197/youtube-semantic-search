@@ -249,7 +249,7 @@ input:checked + .slider:before {
 }
 
 /* Channel List Panel */
-html { scrollbar-gutter: stable both-edges; }
+html { scrollbar-gutter: stable; }
 body { overflow-y: scroll; }
 
 .channel-list {
