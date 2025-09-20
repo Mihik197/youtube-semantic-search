@@ -220,7 +220,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 const scoreClass = App.Utils.scoreClass(video.score);
                 card.innerHTML = `
                     <div class="card video-card h-100">
-                        <div class="position-relative">
+                        <div class="position-relative thumb-wrapper">
                             <img src="${video.thumbnail || 'https://via.placeholder.com/480x360?text=No+Thumbnail'}" class="card-img-top" alt="${video.title}" loading="lazy">
                             <span class="score-badge ${scoreClass}">${video.score.toFixed(3)}</span>
                         </div>

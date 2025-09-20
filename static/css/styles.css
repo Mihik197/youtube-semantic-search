@@ -125,7 +125,20 @@ body {
 }
 
 .video-card .card-title {
-    font-weight: 600;
+	font-weight: 600;
+	margin-bottom: 0.35rem; /* tighter spacing below title */
+	line-height: 1.25;
+}
+
+/* Tighter layout for card body content */
+.video-card .card-body {
+	padding: 0.75rem 0.9rem 0.4rem; /* reduce bottom padding to bring footer closer */
+}
+
+.video-card .channel-name {
+	margin: 0; /* remove default paragraph margin */
+	font-size: 0.85rem;
+	color: var(--text-medium);
 }
 
 .video-card .card-img-top {
@@ -133,8 +146,28 @@ body {
 	border-top-right-radius: var(--border-radius);
 }
 
+/* Ensure thumbnails display at a consistent 16:9 ratio without extra vertical space */
+.video-card .thumb-wrapper {
+	aspect-ratio: 16 / 9;
+	width: 100%;
+	overflow: hidden;
+	background: #000; /* fallback background */
+	border-top-left-radius: var(--border-radius);
+	border-top-right-radius: var(--border-radius);
+}
+
+.video-card .thumb-wrapper > img.card-img-top {
+	width: 100%;
+	height: 100%;
+	object-fit: cover; /* crop any letterboxing */
+	display: block;
+	margin: 0; /* remove any accidental gaps */
+	border-top-left-radius: var(--border-radius);
+	border-top-right-radius: var(--border-radius);
+}
+
 .video-card .card-footer {
-    padding: 0.75rem 1rem;
+	padding: 0.5rem 0.9rem 0.55rem; /* slightly reduced to tighten gap */
 }
 
 .video-card .card-footer .btn {
