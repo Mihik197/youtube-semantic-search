@@ -1,266 +1,423 @@
+// Modular namespace pattern (single bundle to avoid changing HTML script includes)
+// Each sub-module exposes init and internal helpers. Order of initialization is managed centrally.
 document.addEventListener("DOMContentLoaded", () => {
-    // --- DOM Element Cache ---
-    const ui = {
-        themeSwitch: document.getElementById("themeSwitch"),
-        searchForm: document.querySelector(".search-form"),
-        searchQuery: document.getElementById("searchQuery"),
-        searchButton: document.getElementById("searchButton"),
-        searchSuggestions: document.querySelectorAll(".search-suggestion"),
-        numResults: document.getElementById("numResults"),
-        numResultsValue: document.getElementById("numResultsValue"),
-        emptyState: document.getElementById("emptyState"),
-        searchProgress: document.getElementById("searchProgress"),
-        resultsArea: document.getElementById("resultsArea"),
-        resultsContainer: document.getElementById("resultsContainer"),
-        resultCount: document.getElementById("resultCount"),
-        noResults: document.getElementById("noResults"),
-        videoModal: document.getElementById("videoModal"),
-        videoModalLabel: document.getElementById("videoModalLabel"),
-        videoIframe: document.getElementById("videoIframe"),
-        videoInfo: document.getElementById("videoInfo"),
-        embeddingText: document.getElementById("embeddingText"),
-        metadataJson: document.getElementById("metadataJson"),
-        watchOnYouTube: document.getElementById("watchOnYouTube"),
-        copyEmbedding: document.getElementById("copyEmbedding"),
-        copyMetadata: document.getElementById("copyMetadata"),
+    const App = {
+        ui: {},
+        state: {
+            channel: {
+                currentSort: 'count_desc',
+                dataCache: { channels: [], total_available: 0, loaded: 0, limit: 50 },
+                searchTerm: '',
+                offset: 0,
+                pageSize: 50,
+                fetching: false,
+                activeFilter: null
+            }
+        },
+        init() {
+            this.cacheDom();
+            this.Theme.init();
+            this.Tooltips.init();
+            this.Utils.bindGlobal();
+            this.Search.init();
+            this.Modal.init();
+            this.Channels.init();
+        },
+        cacheDom() {
+            this.ui = {
+                themeSwitch: document.getElementById("themeSwitch"),
+                searchForm: document.querySelector(".search-form"),
+                searchQuery: document.getElementById("searchQuery"),
+                searchButton: document.getElementById("searchButton"),
+                searchSuggestions: document.querySelectorAll(".search-suggestion"),
+                numResults: document.getElementById("numResults"),
+                numResultsValue: document.getElementById("numResultsValue"),
+                emptyState: document.getElementById("emptyState"),
+                searchProgress: document.getElementById("searchProgress"),
+                resultsArea: document.getElementById("resultsArea"),
+                resultsContainer: document.getElementById("resultsContainer"),
+                resultCount: document.getElementById("resultCount"),
+                noResults: document.getElementById("noResults"),
+                videoModal: document.getElementById("videoModal"),
+                videoModalLabel: document.getElementById("videoModalLabel"),
+                videoIframe: document.getElementById("videoIframe"),
+                videoInfo: document.getElementById("videoInfo"),
+                embeddingText: document.getElementById("embeddingText"),
+                metadataJson: document.getElementById("metadataJson"),
+                watchOnYouTube: document.getElementById("watchOnYouTube"),
+                copyEmbedding: document.getElementById("copyEmbedding"),
+                copyMetadata: document.getElementById("copyMetadata"),
+                channelList: document.getElementById("channelList"),
+                channelsLoading: document.getElementById("channelsLoading"),
+                channelsError: document.getElementById("channelsError")
+            };
+        },
+        Utils: {
+            bindGlobal() {},
+            escapeHtml(str) {
+                if (typeof str !== 'string') return '';
+                return str.replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
+            },
+            copyToClipboard(text, button) {
+                navigator.clipboard.writeText(text).then(() => {
+                    const originalText = button.innerHTML;
+                    button.innerHTML = '<i class="bi bi-check-lg"></i> Copied!';
+                    setTimeout(() => { button.innerHTML = originalText; }, 2000);
+                }, (err) => {
+                    console.error('Could not copy text: ', err);
+                    const originalText = button.innerHTML;
+                    button.innerHTML = 'Error!';
+                    setTimeout(() => { button.innerHTML = originalText; }, 2000);
+                });
+            },
+            scoreClass(score) {
+                if (score >= 0.8) return "bg-success";
+                if (score >= 0.6) return "bg-primary";
+                if (score >= 0.4) return "bg-info";
+                if (score >= 0.2) return "bg-warning";
+                return "bg-secondary";
+            },
+            setLoading(isLoading) {
+                const ui = App.ui;
+                if (!ui.searchButton) return;
+                if (isLoading) {
+                    ui.searchButton.disabled = true;
+                    ui.searchButton.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Searching...`;
+                    ui.emptyState?.classList.add('d-none');
+                    ui.resultsArea?.classList.add('d-none');
+                    ui.noResults?.classList.add('d-none');
+                    ui.searchProgress?.classList.remove('d-none');
+                } else {
+                    ui.searchButton.disabled = false;
+                    ui.searchButton.innerHTML = `<i class="bi bi-search"></i> Search`;
+                    ui.searchProgress?.classList.add('d-none');
+                }
+            },
+            showError(message) {
+                const ui = App.ui;
+                ui.resultsArea?.classList.add('d-none');
+                if (ui.noResults) {
+                    ui.noResults.innerHTML = `
+                        <i class="bi bi-exclamation-triangle-fill"></i>
+                        <div>
+                            <strong>Search Error</strong>
+                            <p class="mb-0">${message}</p>
+                        </div>`;
+                    ui.noResults.classList.remove('d-none');
+                }
+            }
+        },
+        Theme: {
+            init() {
+                const ui = App.ui;
+                const savedTheme = localStorage.getItem("theme") || "light";
+                document.documentElement.setAttribute("data-bs-theme", savedTheme);
+                if (ui.themeSwitch) {
+                    ui.themeSwitch.checked = savedTheme === "dark";
+                    ui.themeSwitch.addEventListener("change", (e) => {
+                        const theme = e.target.checked ? "dark" : "light";
+                        document.documentElement.setAttribute("data-bs-theme", theme);
+                        localStorage.setItem("theme", theme);
+                    });
+                }
+            }
+        },
+        Tooltips: {
+            init() {
+                if (typeof bootstrap !== "undefined" && bootstrap.Tooltip) {
+                    const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+                    tooltipTriggerList.map(el => new bootstrap.Tooltip(el));
+                }
+            },
+            refresh() { this.init(); }
+        },
+        Search: {
+            init() {
+                const ui = App.ui;
+                ui.searchButton?.addEventListener('click', () => this.perform());
+                ui.searchQuery?.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); this.perform(); }});
+                ui.numResults?.addEventListener('input', function(){ ui.numResultsValue.textContent = this.value; });
+                ui.searchSuggestions.forEach(s => s.addEventListener('click', e => { e.preventDefault(); ui.searchQuery.value = s.textContent.trim(); ui.searchQuery.focus(); }));
+            },
+            async perform() {
+                const ui = App.ui;
+                const query = ui.searchQuery.value.trim();
+                if (!query) { ui.searchQuery.focus(); return; }
+                App.Utils.setLoading(true);
+                try {
+                    const resp = await fetch('/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query, num_results: parseInt(ui.numResults.value) }) });
+                    if (!resp.ok) throw new Error(`HTTP error! Status: ${resp.status}`);
+                    const data = await resp.json();
+                    App.Results.render(data.results);
+                    const headerEl = document.getElementById('resultsHeader');
+                    if (headerEl) headerEl.textContent = 'Search Results';
+                } catch (e) {
+                    console.error('Search error:', e);
+                    App.Utils.showError(e.message);
+                } finally {
+                    App.Utils.setLoading(false);
+                }
+            }
+        },
+        Results: {
+            render(results) {
+                const ui = App.ui;
+                if (!results || results.length === 0) {
+                    ui.resultsArea?.classList.add('d-none');
+                    ui.noResults?.classList.remove('d-none');
+                    return;
+                }
+                ui.resultsContainer.innerHTML = '';
+                ui.resultCount.textContent = results.length;
+                const frag = document.createDocumentFragment();
+                results.forEach((video, idx) => {
+                    frag.appendChild(this.card(video, idx));
+                });
+                ui.resultsContainer.appendChild(frag);
+                ui.resultsArea.classList.remove('d-none');
+                App.Tooltips.refresh();
+                ui.resultsContainer.querySelectorAll('.view-details').forEach(btn => btn.addEventListener('click', () => App.Modal.open(btn.dataset)));
+            },
+            card(video, index) {
+                const card = document.createElement('div');
+                card.className = 'col video-card-wrapper';
+                const scoreClass = App.Utils.scoreClass(video.score);
+                card.innerHTML = `
+                    <div class="card video-card h-100">
+                        <div class="position-relative">
+                            <img src="${video.thumbnail || 'https://via.placeholder.com/480x360?text=No+Thumbnail'}" class="card-img-top" alt="${video.title}" loading="lazy">
+                            <span class="score-badge ${scoreClass}">${video.score.toFixed(3)}</span>
+                        </div>
+                        <div class="card-body">
+                            <h5 class="card-title">${video.title}</h5>
+                            <p class="channel-name"><i class="bi bi-person-circle"></i> ${video.channel}</p>
+                        </div>
+                        <div class="card-footer d-flex justify-content-between align-items-center">
+                            <button class="btn btn-sm btn-outline-primary view-details" 
+                                data-video-id="${video.id}"
+                                data-video-url="${video.url}"
+                                data-video-title="${video.title}"
+                                data-video-channel="${video.channel}"
+                                data-video-document="${encodeURIComponent(video.document)}"
+                                data-video-metadata="${encodeURIComponent(JSON.stringify(video.metadata))}"
+                                data-bs-toggle="tooltip" title="View video details">
+                                <i class="bi bi-info-circle"></i> Details
+                            </button>
+                            <a href="${video.url}" target="_blank" class="btn btn-sm btn-danger" data-bs-toggle="tooltip" title="Open in YouTube">
+                                <i class="bi bi-youtube"></i> Watch
+                            </a>
+                        </div>
+                    </div>`;
+                setTimeout(() => card.classList.add('visible'), 50 * index);
+                return card;
+            }
+        },
+        Modal: {
+            init() {
+                const ui = App.ui;
+                ui.videoModal?.addEventListener('hidden.bs.modal', () => { ui.videoIframe.src = 'about:blank'; });
+                ui.copyEmbedding?.addEventListener('click', () => App.Utils.copyToClipboard(ui.embeddingText.textContent, ui.copyEmbedding));
+                ui.copyMetadata?.addEventListener('click', () => App.Utils.copyToClipboard(ui.metadataJson.textContent, ui.copyMetadata));
+            },
+            open(dataset) {
+                const ui = App.ui;
+                const { videoId, videoUrl, videoTitle, videoChannel, videoDocument, videoMetadata } = dataset;
+                const metadata = JSON.parse(decodeURIComponent(videoMetadata));
+                ui.videoModalLabel.textContent = videoTitle;
+                ui.videoIframe.src = `https://www.youtube.com/embed/${videoId}`;
+                ui.watchOnYouTube.href = videoUrl;
+                ui.videoInfo.innerHTML = `
+                    <table class="table table-hover">
+                        <tbody>
+                            <tr><th class="w-25">Title</th><td>${videoTitle}</td></tr>
+                            <tr><th>Channel</th><td>${videoChannel}</td></tr>
+                            <tr><th>YouTube ID</th><td><code>${videoId}</code></td></tr>
+                        </tbody>
+                    </table>`;
+                ui.embeddingText.textContent = decodeURIComponent(videoDocument);
+                ui.metadataJson.textContent = JSON.stringify(metadata, null, 2);
+                const modal = new bootstrap.Modal(ui.videoModal);
+                modal.show();
+            }
+        },
+        Channels: {
+            init() {
+                const ui = App.ui;
+                if (!ui.channelList) return;
+                this.bindSortButtons();
+                this.bindSearch();
+                this.bindLoadMore();
+                this.resetAndFetch();
+            },
+            bindSortButtons() {
+                const state = App.state.channel;
+                const popularBtn = document.getElementById('sortPopularBtn');
+                const alphaBtn = document.getElementById('sortAlphaBtn');
+                if (popularBtn) {
+                    popularBtn.addEventListener('click', () => {
+                        if (state.fetching) return;
+                        const mode = popularBtn.getAttribute('data-mode');
+                        if (mode === 'desc') {
+                            state.currentSort = 'count_asc';
+                            popularBtn.setAttribute('data-mode', 'asc');
+                            const iconDir = document.getElementById('popularDirIcon');
+                            if (iconDir) iconDir.className = 'bi bi-arrow-up-short ms-1';
+                        } else {
+                            state.currentSort = 'count_desc';
+                            popularBtn.setAttribute('data-mode', 'desc');
+                            const iconDir = document.getElementById('popularDirIcon');
+                            if (iconDir) iconDir.className = 'bi bi-arrow-down-short ms-1';
+                        }
+                        popularBtn.classList.add('active');
+                        alphaBtn?.classList.remove('active');
+                        this.resetAndFetch();
+                    });
+                }
+                if (alphaBtn) {
+                    alphaBtn.addEventListener('click', () => {
+                        if (state.fetching) return;
+                        const isActive = alphaBtn.classList.contains('active');
+                        if (!isActive) {
+                            state.currentSort = 'alpha';
+                            alphaBtn.classList.add('active');
+                            popularBtn?.classList.remove('active');
+                            this.resetAndFetch();
+                        } else {
+                            state.currentSort = state.currentSort === 'alpha' ? 'alpha_desc' : 'alpha';
+                            this.resetAndFetch();
+                        }
+                        if (state.currentSort === 'alpha') {
+                            alphaBtn.innerHTML = '<i class="bi bi-sort-alpha-down"></i>';
+                        } else if (state.currentSort === 'alpha_desc') {
+                            alphaBtn.innerHTML = '<i class="bi bi-sort-alpha-up"></i>';
+                        }
+                    });
+                }
+            },
+            bindSearch() {
+                const input = document.getElementById('channelSearchInput');
+                input?.addEventListener('input', (e) => {
+                    App.state.channel.searchTerm = e.target.value.trim().toLowerCase();
+                    this.renderFiltered();
+                    const loadMoreBtn = document.getElementById('channelsLoadMoreBtn');
+                    const hasMore = loadMoreBtn && !loadMoreBtn.classList.contains('d-none');
+                    if (hasMore) {
+                        const visibleCount = App.ui.channelList.querySelectorAll('.channel-item').length;
+                        if (visibleCount > 0 && visibleCount < 8 && !App.state.channel.fetching) {
+                            this.fetchPage();
+                        }
+                    }
+                });
+            },
+            bindLoadMore() {
+                const btn = document.getElementById('channelsLoadMoreBtn');
+                btn?.addEventListener('click', () => {
+                    const st = App.state.channel;
+                    if (!st.fetching && st.loaded < st.total_available) this.fetchPage();
+                });
+            },
+            resetAndFetch() {
+                const st = App.state.channel;
+                const ui = App.ui;
+                st.dataCache.channels = [];
+                st.dataCache.loaded = 0;
+                st.offset = 0;
+                ui.channelList.innerHTML = '';
+                this.fetchPage();
+            },
+            async fetchPage(retry=false) {
+                const st = App.state.channel;
+                const ui = App.ui;
+                console.debug('Fetching channels page', { offset: st.offset, sort: st.currentSort });
+                st.fetching = true;
+                ui.channelsError?.classList.add('d-none');
+                if (st.offset === 0) {
+                    ui.channelsLoading?.classList.remove('d-none');
+                    ui.channelList?.classList.add('d-none');
+                }
+                try {
+                    const resp = await fetch(`/channels?sort=${encodeURIComponent(st.currentSort)}&limit=${st.pageSize}&offset=${st.offset}`);
+                    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                    const data = await resp.json();
+                    if (st.offset === 0) {
+                        st.dataCache.total_available = data.total_available ?? data.distinct_channels ?? 0;
+                    }
+                        st.dataCache.channels.push(...data.channels);
+                        st.dataCache.loaded += data.channels.length;
+                        st.offset += data.channels.length;
+                        this.renderFiltered();
+                        this.updateLoadMore(data.has_more);
+                } catch (e) {
+                    console.error('Failed to load channels page', e);
+                    if (!retry) { setTimeout(() => this.fetchPage(true), 400); return; }
+                    ui.channelsError?.classList.remove('d-none');
+                } finally {
+                    ui.channelsLoading?.classList.add('d-none');
+                    st.fetching = false;
+                }
+            },
+            renderFiltered() {
+                const ui = App.ui; const st = App.state.channel;
+                if (!ui.channelList) return;
+                ui.channelList.innerHTML = '';
+                const filtered = st.dataCache.channels.filter(ch => !st.searchTerm || ch.channel.toLowerCase().includes(st.searchTerm));
+                if (filtered.length === 0) {
+                    const li = document.createElement('li');
+                    li.className = 'channel-item';
+                    li.textContent = st.searchTerm ? 'No matching channels' : 'No channel data available';
+                    ui.channelList.appendChild(li);
+                } else {
+                    filtered.forEach(ch => {
+                        const li = document.createElement('li');
+                        li.className = 'channel-item';
+                        li.setAttribute('role', 'listitem');
+                        li.setAttribute('tabindex', '0');
+                        li.setAttribute('data-channel', ch.channel);
+                        li.innerHTML = `
+                            <span class="channel-name" title="${App.Utils.escapeHtml(ch.channel)}">${App.Utils.escapeHtml(ch.channel)}</span>
+                            <div class="channel-bar-wrapper" aria-label="${ch.percent}% of saved videos">
+                                <div class="channel-bar" style="width:${ch.percent}%;"></div>
+                            </div>
+                            <span class="badge bg-secondary-subtle text-secondary-emphasis channel-count">${ch.count}</span>`;
+                        li.addEventListener('click', () => this.select(li));
+                        li.addEventListener('keydown', (ev) => {
+                            if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); this.select(li); }
+                        });
+                        ui.channelList.appendChild(li);
+                    });
+                }
+                ui.channelList.classList.remove('d-none');
+            },
+            updateLoadMore(hasMore) {
+                const btn = document.getElementById('channelsLoadMoreBtn');
+                if (!btn) return; if (hasMore) { btn.classList.remove('d-none'); btn.disabled = false; } else { btn.classList.add('d-none'); }
+            },
+            select(li) {
+                const ui = App.ui; const st = App.state.channel;
+                const channel = li.getAttribute('data-channel');
+                ui.channelList.querySelectorAll('.channel-item').forEach(item => item.classList.remove('active'));
+                li.classList.add('active');
+                st.activeFilter = channel;
+                this.fetchChannelVideos(channel);
+            },
+            async fetchChannelVideos(channel) {
+                if (!channel) return;
+                try {
+                    App.Utils.setLoading(true);
+                    const resp = await fetch(`/channel_videos?channel=${encodeURIComponent(channel)}`);
+                    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                    const data = await resp.json();
+                    App.Results.render(data.results || []);
+                    const headerEl = document.getElementById('resultsHeader');
+                    if (headerEl) headerEl.textContent = `${channel} (${data.count ?? data.results.length} videos)`;
+                } catch (e) {
+                    console.error('Failed to load channel videos', e);
+                } finally {
+                    App.Utils.setLoading(false);
+                }
+            }
+        }
     };
 
-    // --- Initialization ---
-    initTheme();
-    initTooltips();
-    initSearch();
-    initModal();
-
-    // --- Theme Switcher ---
-    function initTheme() {
-        const savedTheme = localStorage.getItem("theme") || "light";
-        document.documentElement.setAttribute("data-bs-theme", savedTheme);
-        if (ui.themeSwitch) {
-            ui.themeSwitch.checked = savedTheme === "dark";
-            ui.themeSwitch.addEventListener("change", (e) => {
-                const theme = e.target.checked ? "dark" : "light";
-                document.documentElement.setAttribute("data-bs-theme", theme);
-                localStorage.setItem("theme", theme);
-            });
-        }
-    }
-
-    // --- Bootstrap Tooltips ---
-    function initTooltips() {
-        if (typeof bootstrap !== "undefined" && bootstrap.Tooltip) {
-            const tooltipTriggerList = [].slice.call(
-                document.querySelectorAll('[data-bs-toggle="tooltip"]')
-            );
-            tooltipTriggerList.map(
-                (tooltipTriggerEl) => new bootstrap.Tooltip(tooltipTriggerEl)
-            );
-        }
-    }
-
-    // --- Search Functionality ---
-    function initSearch() {
-        ui.searchButton?.addEventListener("click", performSearch);
-        ui.searchQuery?.addEventListener("keydown", (e) => {
-            if (e.key === "Enter") {
-                e.preventDefault();
-                performSearch();
-            }
-        });
-
-        ui.numResults?.addEventListener("input", function () {
-            ui.numResultsValue.textContent = this.value;
-        });
-
-        ui.searchSuggestions.forEach((suggestion) => {
-            suggestion.addEventListener("click", (e) => {
-                e.preventDefault();
-                ui.searchQuery.value = suggestion.textContent.trim();
-                ui.searchQuery.focus();
-            });
-        });
-    }
-
-    async function performSearch() {
-        const query = ui.searchQuery.value.trim();
-        if (!query) {
-            ui.searchQuery.focus();
-            return;
-        }
-
-        setLoadingState(true);
-
-        try {
-            const response = await fetch("/search", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    query: query,
-                    num_results: parseInt(ui.numResults.value),
-                }),
-            });
-
-            if (!response.ok) {
-                throw new Error(`HTTP error! Status: ${response.status}`);
-            }
-
-            const data = await response.json();
-            displayResults(data.results);
-        } catch (error) {
-            console.error("Search error:", error);
-            showErrorState(error.message);
-        } finally {
-            setLoadingState(false);
-        }
-    }
-
-    function setLoadingState(isLoading) {
-        if (isLoading) {
-            ui.searchButton.disabled = true;
-            ui.searchButton.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Searching...`;
-            ui.emptyState.classList.add("d-none");
-            ui.resultsArea.classList.add("d-none");
-            ui.noResults.classList.add("d-none");
-            ui.searchProgress.classList.remove("d-none");
-        } else {
-            ui.searchButton.disabled = false;
-            ui.searchButton.innerHTML = `<i class="bi bi-search"></i> Search`;
-            ui.searchProgress.classList.add("d-none");
-        }
-    }
-
-    function showErrorState(message) {
-        ui.resultsArea.classList.add("d-none");
-        ui.noResults.innerHTML = `
-            <i class="bi bi-exclamation-triangle-fill"></i>
-            <div>
-                <strong>Search Error</strong>
-                <p class="mb-0">${message}</p>
-            </div>`;
-        ui.noResults.classList.remove("d-none");
-    }
-
-    // --- Results Display ---
-    function displayResults(results) {
-        if (!results || results.length === 0) {
-            ui.resultsArea.classList.add("d-none");
-            ui.noResults.classList.remove("d-none");
-            return;
-        }
-
-        ui.resultsContainer.innerHTML = "";
-        ui.resultCount.textContent = results.length;
-
-        results.forEach((video, index) => {
-            const card = createVideoCard(video);
-            ui.resultsContainer.appendChild(card);
-            setTimeout(() => card.classList.add("visible"), 50 * index);
-        });
-
-        ui.resultsArea.classList.remove("d-none");
-        initTooltips(); // Re-initialize for new elements
-        
-        document.querySelectorAll(".view-details").forEach((button) => {
-            button.addEventListener("click", () => openVideoModal(button.dataset));
-        });
-    }
-
-    function createVideoCard(video) {
-        const scoreClass = getScoreClass(video.score);
-        const card = document.createElement("div");
-        card.className = "col video-card-wrapper";
-        card.innerHTML = `
-            <div class="card video-card h-100">
-                <div class="position-relative">
-                    <img src="${video.thumbnail || 'https://via.placeholder.com/480x360?text=No+Thumbnail'}" 
-                         class="card-img-top" alt="${video.title}" loading="lazy">
-                    <span class="score-badge ${scoreClass}">${video.score.toFixed(3)}</span>
-                </div>
-                <div class="card-body">
-                    <h5 class="card-title">${video.title}</h5>
-                    <p class="channel-name"><i class="bi bi-person-circle"></i> ${video.channel}</p>
-                </div>
-                <div class="card-footer d-flex justify-content-between align-items-center">
-                    <button class="btn btn-sm btn-outline-primary view-details" 
-                            data-video-id="${video.id}"
-                            data-video-url="${video.url}"
-                            data-video-title="${video.title}"
-                            data-video-channel="${video.channel}"
-                            data-video-document="${encodeURIComponent(video.document)}"
-                            data-video-metadata="${encodeURIComponent(JSON.stringify(video.metadata))}"
-                            data-bs-toggle="tooltip" title="View video details">
-                        <i class="bi bi-info-circle"></i> Details
-                    </button>
-                    <a href="${video.url}" target="_blank" class="btn btn-sm btn-danger"
-                       data-bs-toggle="tooltip" title="Open in YouTube">
-                        <i class="bi bi-youtube"></i> Watch
-                    </a>
-                </div>
-            </div>
-        `;
-        return card;
-    }
-
-    function getScoreClass(score) {
-        if (score >= 0.8) return "bg-success";
-        if (score >= 0.6) return "bg-primary";
-        if (score >= 0.4) return "bg-info";
-        if (score >= 0.2) return "bg-warning";
-        return "bg-secondary";
-    }
-
-    // --- Modal Functionality ---
-    function initModal() {
-        ui.videoModal?.addEventListener("hidden.bs.modal", () => {
-            ui.videoIframe.src = "about:blank";
-        });
-
-        ui.copyEmbedding?.addEventListener("click", () => {
-            copyToClipboard(ui.embeddingText.textContent, ui.copyEmbedding);
-        });
-
-        ui.copyMetadata?.addEventListener("click", () => {
-            copyToClipboard(ui.metadataJson.textContent, ui.copyMetadata);
-        });
-    }
-
-    function openVideoModal(dataset) {
-        const { videoId, videoUrl, videoTitle, videoChannel, videoDocument, videoMetadata } = dataset;
-        const metadata = JSON.parse(decodeURIComponent(videoMetadata));
-
-        ui.videoModalLabel.textContent = videoTitle;
-        ui.videoIframe.src = `https://www.youtube.com/embed/${videoId}`;
-        ui.watchOnYouTube.href = videoUrl;
-
-        ui.videoInfo.innerHTML = `
-            <table class="table table-hover">
-                <tbody>
-                    <tr><th class="w-25">Title</th><td>${videoTitle}</td></tr>
-                    <tr><th>Channel</th><td>${videoChannel}</td></tr>
-                    <tr><th>YouTube ID</th><td><code>${videoId}</code></td></tr>
-                </tbody>
-            </table>`;
-        
-        ui.embeddingText.textContent = decodeURIComponent(videoDocument);
-        ui.metadataJson.textContent = JSON.stringify(metadata, null, 2);
-
-        const modal = new bootstrap.Modal(ui.videoModal);
-        modal.show();
-    }
-
-    function copyToClipboard(text, button) {
-        navigator.clipboard.writeText(text).then(() => {
-            const originalText = button.innerHTML;
-            button.innerHTML = '<i class="bi bi-check-lg"></i> Copied!';
-            setTimeout(() => {
-                button.innerHTML = originalText;
-            }, 2000);
-        }, (err) => {
-            console.error('Could not copy text: ', err);
-            const originalText = button.innerHTML;
-            button.innerHTML = 'Error!';
-            setTimeout(() => {
-                button.innerHTML = originalText;
-            }, 2000);
-        });
-    }
+    App.init();
 });

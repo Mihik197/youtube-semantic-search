@@ -107,3 +107,92 @@ class VectorDBService:
         except Exception as e:
             print(f"Error counting items in ChromaDB: {e}")
             return 0
+
+    def get_all_metadatas(self, batch_size: int = 1000, include_ids: bool = True) -> list[dict]:
+        """Retrieve all metadatas (and optionally IDs) from the collection.
+
+        Chroma's collection.get may limit results; this performs batched retrieval.
+
+        Args:
+            batch_size: Number of records to pull per batch.
+            include_ids: If True, include the id in each metadata dict under key 'id'.
+
+        Returns:
+            List of metadata dictionaries.
+        """
+        metadatas: list[dict] = []
+        try:
+            total = self.count()
+            if total == 0:
+                return metadatas
+            offset = 0
+            while offset < total:
+                try:
+                    batch = self.collection.get(
+                        include=["metadatas"],
+                        offset=offset,
+                        limit=min(batch_size, total - offset)
+                    )
+                    batch_metas = batch.get('metadatas', []) or []
+                    if include_ids:
+                        batch_ids = batch.get('ids', []) or []
+                        for i, m in enumerate(batch_metas):
+                            if isinstance(m, dict):
+                                m = m.copy()
+                                if i < len(batch_ids):
+                                    m['id'] = batch_ids[i]
+                                metadatas.append(m)
+                    else:
+                        metadatas.extend([m for m in batch_metas if isinstance(m, dict)])
+                    if not batch_metas:
+                        break  # defensive break to avoid infinite loop
+                    offset += len(batch_metas)
+                except Exception as inner_e:
+                    print(f"Warning: Failed to retrieve metadatas batch at offset {offset}: {inner_e}")
+                    break
+        except Exception as e:
+            print(f"Error retrieving all metadatas: {e}")
+        return metadatas
+
+    def get_videos_by_channel(self, channel: str, limit: int = 500) -> list[dict]:
+        """Return a list of video metadata dicts for a specific channel.
+
+        Args:
+            channel: Channel name to match exactly (case-sensitive as stored).
+            limit: Max number of videos to return (safety cap).
+        Returns:
+            List of dictionaries with keys: id, title, channel, url, (and others present in metadata).
+        """
+        if not channel:
+            return []
+        try:
+            # Attempt simple where filter; if unsupported, fallback to manual filter
+            raw = self.collection.get(
+                where={'channel': channel},
+                include=['metadatas', 'ids', 'documents'],
+                limit=limit
+            )
+            metadatas = raw.get('metadatas', []) or []
+            ids = raw.get('ids', []) or []
+            docs = raw.get('documents', []) or []
+            videos = []
+            for i, m in enumerate(metadatas):
+                if not isinstance(m, dict):
+                    continue
+                vid = m.copy()
+                if i < len(ids):
+                    vid['id'] = ids[i]
+                if i < len(docs):
+                    vid['document'] = docs[i]
+                videos.append(vid)
+            return videos
+        except Exception as e:
+            print(f"Warning: direct channel query failed ({e}); falling back to full scan.")
+            # Fallback full scan limited by limit
+            result = []
+            for m in self.get_all_metadatas():
+                if m.get('channel') == channel:
+                    result.append(m)
+                    if len(result) >= limit:
+                        break
+            return result
