@@ -161,6 +161,15 @@ body {
 	align-items: center;
 }
 
+.theme-switch-wrapper .theme-icon {
+	font-size: 1rem;
+	margin-left: 0.5rem;
+	color: var(--text-medium);
+}
+
+.theme-switch-wrapper .theme-icon.sun { color: #f39c12; }
+.theme-switch-wrapper .theme-icon.moon { color: #9b59b6; }
+
 .theme-switch {
 	position: relative;
 	display: inline-block;
@@ -207,22 +216,52 @@ input:checked + .slider:before {
 }
 
 /* Channel List Panel */
+html { scrollbar-gutter: stable both-edges; }
+body { overflow-y: scroll; }
+
 .channel-list {
-	max-height: 40vh;
+	height: 40vh; /* fixed to prevent layout jump when item count changes */
 	overflow-y: auto;
 	margin: 0;
 	padding: 0;
 	border: 1px solid var(--bs-border-color-translucent);
 	border-radius: var(--border-radius);
 	background: var(--background-white);
+	position: relative; /* for overlay */
 }
+
+.channel-list.loading::after {
+	content: "";
+	position: absolute;
+	inset: 0;
+	background: var(--background-white, #fff);
+	opacity: 0.55;
+	pointer-events: none;
+	transition: opacity .2s ease;
+}
+
+.channel-list.loading::before {
+	content: "";
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	width: 1.75rem;
+	height: 1.75rem;
+	margin: -0.875rem;
+	border: 2px solid var(--primary-color);
+	border-top-color: transparent;
+	border-radius: 50%;
+	animation: spin .6s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
 
 .channel-item {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	padding: 0.4rem 0.6rem;
-	gap: 0.5rem;
+	padding: 0.45rem 0.65rem;
+	gap: 0.75rem;
 	font-size: 0.85rem;
 	cursor: pointer;
 	position: relative;
@@ -250,37 +289,30 @@ input:checked + .slider:before {
 	flex: 0 0 auto;
 }
 
-.channel-name {
-	flex: 1 1 auto;
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
-}
+.channel-name { flex: 1 1 auto; }
+.channel-name.full { white-space: normal; overflow: visible; text-overflow: unset; }
 
 .channel-count {
 	font-weight: 500;
 }
 
-.channel-bar-wrapper {
-	flex: 1 1 40%;
-	height: 6px;
-	background: var(--bs-secondary-bg, rgba(0,0,0,0.05));
-	border-radius: 4px;
-	overflow: hidden;
-	position: relative;
-}
+/* Removed channel popularity bars to free space */
 
-.channel-bar {
-	height: 100%;
-	background: linear-gradient(90deg, var(--primary-color) 0%, var(--primary-light) 70%);
-	width: 0%;
-	transition: width 0.6s ease;
+.channel-sentinel {
+	list-style: none;
+	padding: 0.45rem 0;
+	text-align: center;
+	font-size: 0.7rem;
+	color: var(--text-light);
+	opacity: 0.75;
 }
 
 .channel-skeleton-list {
 	border: 1px solid var(--bs-border-color-translucent);
 	border-radius: var(--border-radius);
 	padding: 0.5rem;
+	height: 40vh; /* match list height to avoid reflow jump */
+	overflow: hidden;
 }
 
 .channel-skeleton {
@@ -318,3 +350,22 @@ input:checked + .slider:before {
 	background: var(--primary-color);
 	color: #fff;
 }
+
+/* Range Bubble Styles */
+.range-bubble-container { position: relative; height: 0.9rem; }
+
+
+.range-bubble {
+	position: absolute;
+	top: -0.15rem; /* bring bubble closer to slider */
+	background: var(--primary-color);
+	color: #fff;
+	padding: 0.15rem 0.55rem;
+	font-size: 0.7rem;
+	border-radius: 12px;
+	font-weight: 500;
+	white-space: nowrap;
+	box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+}
+
+.results-range { margin-top: 0.4rem; }

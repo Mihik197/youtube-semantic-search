@@ -11,7 +11,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 offset: 0,
                 pageSize: 50,
                 fetching: false,
-                activeFilter: null
+                activeFilter: null,
+                firstLoad: true
             }
         },
         init() {
@@ -31,7 +32,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 searchButton: document.getElementById("searchButton"),
                 searchSuggestions: document.querySelectorAll(".search-suggestion"),
                 numResults: document.getElementById("numResults"),
-                numResultsValue: document.getElementById("numResultsValue"),
+                numResultsBubble: document.getElementById("numResultsBubble"),
+                themeLabel: document.getElementById("themeLabel"),
                 emptyState: document.getElementById("emptyState"),
                 searchProgress: document.getElementById("searchProgress"),
                 resultsArea: document.getElementById("resultsArea"),
@@ -114,11 +116,23 @@ document.addEventListener("DOMContentLoaded", () => {
                 document.documentElement.setAttribute("data-bs-theme", savedTheme);
                 if (ui.themeSwitch) {
                     ui.themeSwitch.checked = savedTheme === "dark";
+                    this.updateThemeIndicators(savedTheme);
                     ui.themeSwitch.addEventListener("change", (e) => {
                         const theme = e.target.checked ? "dark" : "light";
                         document.documentElement.setAttribute("data-bs-theme", theme);
                         localStorage.setItem("theme", theme);
+                        this.updateThemeIndicators(theme);
                     });
+                }
+            },
+            updateThemeIndicators(theme) {
+                const ui = App.ui;
+                if (ui.themeLabel) ui.themeLabel.textContent = theme === 'dark' ? 'Dark' : 'Light';
+                const sun = document.querySelector('.theme-icon.sun');
+                const moon = document.querySelector('.theme-icon.moon');
+                if (sun && moon) {
+                    if (theme === 'dark') { sun.classList.add('d-none'); moon.classList.remove('d-none'); }
+                    else { moon.classList.add('d-none'); sun.classList.remove('d-none'); }
                 }
             }
         },
@@ -136,8 +150,30 @@ document.addEventListener("DOMContentLoaded", () => {
                 const ui = App.ui;
                 ui.searchButton?.addEventListener('click', () => this.perform());
                 ui.searchQuery?.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); this.perform(); }});
-                ui.numResults?.addEventListener('input', function(){ ui.numResultsValue.textContent = this.value; });
+                ui.numResults?.addEventListener('input', function(){
+                    if (ui.numResultsBubble) {
+                        ui.numResultsBubble.textContent = this.value;
+                        ui.numResults.setAttribute('aria-valuenow', this.value);
+                        App.Search.updateRangeBubblePosition();
+                    }
+                });
                 ui.searchSuggestions.forEach(s => s.addEventListener('click', e => { e.preventDefault(); ui.searchQuery.value = s.textContent.trim(); ui.searchQuery.focus(); }));
+                setTimeout(() => this.updateRangeBubblePosition(), 0);
+                window.addEventListener('resize', () => this.updateRangeBubblePosition());
+            },
+            updateRangeBubblePosition() {
+                const ui = App.ui;
+                const range = ui.numResults; const bubble = ui.numResultsBubble;
+                if (!range || !bubble) return;
+                const min = parseInt(range.min) || 0; const max = parseInt(range.max) || 100; const val = parseInt(range.value);
+                const percent = (val - min) / (max - min);
+                const sliderWidth = range.getBoundingClientRect().width;
+                const bubbleWidth = bubble.getBoundingClientRect().width;
+                let x = percent * (sliderWidth - 16) + 8 - (bubbleWidth / 2);
+                if (x < 0) x = 0;
+                const maxX = sliderWidth - bubbleWidth;
+                if (x > maxX) x = maxX;
+                bubble.style.left = `${x}px`;
             },
             async perform() {
                 const ui = App.ui;
@@ -246,7 +282,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (!ui.channelList) return;
                 this.bindSortButtons();
                 this.bindSearch();
-                this.bindLoadMore();
+                this.initObserver();
                 this.resetAndFetch();
             },
             bindSortButtons() {
@@ -296,24 +332,46 @@ document.addEventListener("DOMContentLoaded", () => {
             },
             bindSearch() {
                 const input = document.getElementById('channelSearchInput');
-                input?.addEventListener('input', (e) => {
-                    App.state.channel.searchTerm = e.target.value.trim().toLowerCase();
-                    this.renderFiltered();
-                    const loadMoreBtn = document.getElementById('channelsLoadMoreBtn');
-                    const hasMore = loadMoreBtn && !loadMoreBtn.classList.contains('d-none');
-                    if (hasMore) {
-                        const visibleCount = App.ui.channelList.querySelectorAll('.channel-item').length;
-                        if (visibleCount > 0 && visibleCount < 8 && !App.state.channel.fetching) {
-                            this.fetchPage();
-                        }
-                    }
-                });
-            },
-            bindLoadMore() {
-                const btn = document.getElementById('channelsLoadMoreBtn');
-                btn?.addEventListener('click', () => {
+                if (!input) return;
+                const debounced = (function(fn, delay){
+                    let t; return function(...args){ clearTimeout(t); t = setTimeout(()=>fn.apply(this,args), delay); };
+                })( (e) => {
                     const st = App.state.channel;
-                    if (!st.fetching && st.loaded < st.total_available) this.fetchPage();
+                    const newTerm = e.target.value.trim().toLowerCase();
+                    if (newTerm === st.searchTerm) return;
+                    st.searchTerm = newTerm;
+                    this.resetAndFetch();
+                }, 250);
+                input.addEventListener('input', debounced);
+            },
+            initObserver() {
+                const ui = App.ui; const st = App.state.channel;
+                const sentinel = document.createElement('li');
+                sentinel.id = 'channelListSentinel';
+                sentinel.className = 'channel-sentinel';
+                sentinel.textContent = 'Loading more…';
+                sentinel.setAttribute('aria-hidden', 'true');
+                this._sentinel = sentinel;
+                const observer = new IntersectionObserver(entries => {
+                    entries.forEach(entry => {
+                        if (entry.isIntersecting) {
+                            console.debug('[Channels][Observer] Sentinel intersecting', { fetching: st.fetching, loaded: st.loaded, total: st.total_available });
+                            if (!st.fetching && st.loaded < st.total_available) {
+                                this.fetchPage();
+                            }
+                        }
+                    });
+                }, { root: ui.channelList, threshold: 0, rootMargin: '0px 0px 120px 0px' });
+                this._observer = observer;
+                // Fallback scroll listener (safety net)
+                ui.channelList.addEventListener('scroll', () => {
+                    if (st.fetching) return;
+                    if (st.loaded >= st.total_available) return;
+                    const el = ui.channelList;
+                    if (el.scrollHeight - el.scrollTop - el.clientHeight < 140) {
+                        console.debug('[Channels][FallbackScroll] Near bottom trigger');
+                        this.fetchPage();
+                    }
                 });
             },
             resetAndFetch() {
@@ -322,76 +380,119 @@ document.addEventListener("DOMContentLoaded", () => {
                 st.dataCache.channels = [];
                 st.dataCache.loaded = 0;
                 st.offset = 0;
+                // Preserve container to avoid layout shift; show skeleton only on very first initialization
                 ui.channelList.innerHTML = '';
-                this.fetchPage();
+                this.fetchPage(false, st.firstLoad);
+                st.firstLoad = false;
             },
-            async fetchPage(retry=false) {
+            async fetchPage(retry=false, showSkeleton=false) {
                 const st = App.state.channel;
                 const ui = App.ui;
-                console.debug('Fetching channels page', { offset: st.offset, sort: st.currentSort });
+                console.debug('Fetching channels page', { offset: st.offset, sort: st.currentSort, q: st.searchTerm });
                 st.fetching = true;
                 ui.channelsError?.classList.add('d-none');
-                if (st.offset === 0) {
+                if (showSkeleton) {
                     ui.channelsLoading?.classList.remove('d-none');
-                    ui.channelList?.classList.add('d-none');
+                    ui.channelList.classList.add('d-none');
                 }
+                ui.channelList?.classList.add('loading');
                 try {
-                    const resp = await fetch(`/channels?sort=${encodeURIComponent(st.currentSort)}&limit=${st.pageSize}&offset=${st.offset}`);
+                    const qParam = st.searchTerm ? `&q=${encodeURIComponent(st.searchTerm)}` : '';
+                    const resp = await fetch(`/channels?sort=${encodeURIComponent(st.currentSort)}&limit=${st.pageSize}&offset=${st.offset}${qParam}`);
                     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
                     const data = await resp.json();
                     if (st.offset === 0) {
                         st.dataCache.total_available = data.total_available ?? data.distinct_channels ?? 0;
                     }
-                        st.dataCache.channels.push(...data.channels);
-                        st.dataCache.loaded += data.channels.length;
-                        st.offset += data.channels.length;
-                        this.renderFiltered();
-                        this.updateLoadMore(data.has_more);
+                    console.debug('[Channels] Fetch success', { returned: data.channels.length, newOffset: st.offset + data.channels.length, totalAvailable: st.dataCache.total_available, hasMore: data.has_more });
+                    st.dataCache.channels.push(...data.channels);
+                    st.dataCache.loaded += data.channels.length;
+                    st.offset += data.channels.length;
+                    this.renderFiltered();
+                    // Auto-fill if list isn't scrollable yet and more data available
+                    if (!data.error && data.has_more) {
+                        const el = ui.channelList;
+                        if (el.scrollHeight <= el.clientHeight + 10 && st.dataCache.loaded < st.dataCache.total_available) {
+                            setTimeout(() => { if (!st.fetching) this.fetchPage(); }, 50);
+                        }
+                    }
                 } catch (e) {
                     console.error('Failed to load channels page', e);
+                    console.debug('[Channels] Fetch error', e);
                     if (!retry) { setTimeout(() => this.fetchPage(true), 400); return; }
                     ui.channelsError?.classList.remove('d-none');
                 } finally {
                     ui.channelsLoading?.classList.add('d-none');
+                    ui.channelList.classList.remove('d-none');
+                    ui.channelList?.classList.remove('loading');
                     st.fetching = false;
                 }
             },
             renderFiltered() {
                 const ui = App.ui; const st = App.state.channel;
                 if (!ui.channelList) return;
-                ui.channelList.innerHTML = '';
-                const filtered = st.dataCache.channels.filter(ch => !st.searchTerm || ch.channel.toLowerCase().includes(st.searchTerm));
+                const prevScroll = ui.channelList.scrollTop;
+                const active = st.activeFilter;
+                // Server already filtered by searchTerm; just use cache
+                const filtered = st.dataCache.channels;
+                // Rebuild list always when offset == returned length? Simpler: rebuild on first page or if performing a search (offset <= pageSize)
+                let rebuild = (st.offset <= st.pageSize) || ui.channelList.querySelectorAll('li.channel-item').length === 0;
+                if (rebuild) ui.channelList.innerHTML = '';
+                console.debug('[Channels] renderFiltered', { rebuild, totalFiltered: filtered.length, loaded: st.dataCache.loaded, searchTerm: st.searchTerm });
+                // Destroy existing tooltips to prevent lingering bubbles
+                if (typeof bootstrap !== 'undefined' && bootstrap.Tooltip) {
+                    document.querySelectorAll('#channelList [data-bs-toggle="tooltip"]').forEach(el => {
+                        const tip = bootstrap.Tooltip.getInstance(el);
+                        if (tip) tip.dispose();
+                    });
+                }
                 if (filtered.length === 0) {
                     const li = document.createElement('li');
                     li.className = 'channel-item';
                     li.textContent = st.searchTerm ? 'No matching channels' : 'No channel data available';
                     ui.channelList.appendChild(li);
                 } else {
+                    const existingChannels = new Set(Array.from(ui.channelList.querySelectorAll('li.channel-item')).map(li => li.getAttribute('data-channel')));
                     filtered.forEach(ch => {
+                        if (!rebuild && existingChannels.has(ch.channel)) return;
                         const li = document.createElement('li');
                         li.className = 'channel-item';
                         li.setAttribute('role', 'listitem');
                         li.setAttribute('tabindex', '0');
                         li.setAttribute('data-channel', ch.channel);
                         li.innerHTML = `
-                            <span class="channel-name" title="${App.Utils.escapeHtml(ch.channel)}">${App.Utils.escapeHtml(ch.channel)}</span>
-                            <div class="channel-bar-wrapper" aria-label="${ch.percent}% of saved videos">
-                                <div class="channel-bar" style="width:${ch.percent}%;"></div>
-                            </div>
-                            <span class="badge bg-secondary-subtle text-secondary-emphasis channel-count">${ch.count}</span>`;
+                            <span class="channel-name full">${App.Utils.escapeHtml(ch.channel)}</span>
+                            <span class="badge bg-secondary-subtle text-secondary-emphasis channel-count" title="Saved videos for channel">${ch.count}</span>`;
                         li.addEventListener('click', () => this.select(li));
-                        li.addEventListener('keydown', (ev) => {
-                            if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); this.select(li); }
-                        });
+                        li.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); this.select(li); } });
                         ui.channelList.appendChild(li);
+                        if (active && active === ch.channel) li.classList.add('active');
                     });
+                    // Append sentinel if more pages available
+                    if (this._sentinel) {
+                        if (st.dataCache.loaded < st.dataCache.total_available) {
+                            ui.channelList.appendChild(this._sentinel);
+                            if (this._observer) this._observer.observe(this._sentinel);
+                            console.debug('[Channels] Sentinel appended', { loaded: st.dataCache.loaded, total: st.dataCache.total_available });
+                        } else if (this._sentinel.parentElement) {
+                            if (this._observer) this._observer.unobserve(this._sentinel);
+                        }
+                    }
+                    // If sentinel immediately visible (short list), trigger next fetch
+                    if (this._sentinel && st.dataCache.loaded < st.dataCache.total_available) {
+                        const rect = this._sentinel.getBoundingClientRect();
+                        const parentRect = ui.channelList.getBoundingClientRect();
+                        if (rect.bottom <= parentRect.bottom) {
+                            setTimeout(() => { if (!st.fetching) this.fetchPage(); }, 30);
+                            console.debug('[Channels] Immediate fetch due to visible sentinel');
+                        }
+                    }
+                    // Preserve previous scroll (especially after load more)
+                    ui.channelList.scrollTop = prevScroll;
                 }
                 ui.channelList.classList.remove('d-none');
             },
-            updateLoadMore(hasMore) {
-                const btn = document.getElementById('channelsLoadMoreBtn');
-                if (!btn) return; if (hasMore) { btn.classList.remove('d-none'); btn.disabled = false; } else { btn.classList.add('d-none'); }
-            },
+            // updateLoadMore removed (infinite scroll)
             select(li) {
                 const ui = App.ui; const st = App.state.channel;
                 const channel = li.getAttribute('data-channel');

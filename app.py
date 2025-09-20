@@ -88,6 +88,7 @@ def channels():
         sort = request.args.get('sort', 'count_desc')
         if sort not in {'count_desc', 'count_asc', 'alpha', 'alpha_desc'}:
             sort = 'count_desc'
+        q = request.args.get('q', None)
         # Limit safeguards
         limit_param = request.args.get('limit')
         try:
@@ -105,7 +106,7 @@ def channels():
         if offset < 0:
             offset = 0
         svc = get_channel_aggregation_service()
-        data = svc.get_channels(sort=sort, limit=limit, offset=offset)
+        data = svc.get_channels(sort=sort, limit=limit, offset=offset, q=q)
         return jsonify(data)
     except Exception as e:
         return jsonify({'error': 'Failed to retrieve channels', 'detail': str(e)}), 500

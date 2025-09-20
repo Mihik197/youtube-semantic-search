@@ -95,11 +95,21 @@ class ChannelAggregationService:
         if not self._cache or self._cache_total_count != current_total:
             self._build_cache()
 
-    def get_channels(self, sort: str, limit: int | None, offset: int) -> Dict[str, Any]:
+    def get_channels(self, sort: str, limit: int | None, offset: int, q: str | None = None) -> Dict[str, Any]:
+        """Return (optionally) filtered + sorted + paginated channel list.
+
+        q: optional case-insensitive substring filter applied to channel name BEFORE sorting/pagination.
+        """
         self._ensure_cache()
         data = self._cache
         channels = data.get('channels', [])
 
+        # Apply filter first so pagination reflects filtered dataset
+        query = (q or '').strip().lower()
+        if query:
+            channels = [c for c in channels if query in c['channel'].lower()]
+
+        # Sorting
         if sort == 'count_asc':
             channels_sorted = sorted(channels, key=lambda x: x['count'])
         elif sort == 'alpha':
@@ -121,15 +131,16 @@ class ChannelAggregationService:
         if limit is not None:
             has_more = (offset + len(sliced)) < total_available
         response = {
-            'total_videos': data['total_videos'],
-            'distinct_channels': data['distinct_channels'],
-            'total_available': total_available,
+            'total_videos': data['total_videos'],          # total videos in collection (unfiltered)
+            'distinct_channels': data['distinct_channels'], # distinct channels in collection (unfiltered)
+            'total_available': total_available,             # total channels after filtering
             'returned': len(sliced),
             'offset': offset,
             'limit': limit,
             'has_more': has_more,
             'sort': sort,
             'stale': data.get('stale', False),
+            'q': query if query else None,
             'channels': sliced
         }
         return response

@@ -36,35 +36,27 @@
 						</header>
 
 						<section class="px-3 mb-4">
-							<h5 class="mb-3">Search Options</h5>
-							<div class="mb-4">
-								<label
-									for="numResults"
-									class="form-label d-flex justify-content-between"
-								>
-									<span>Results to show</span>
-									<span
-										class="badge bg-primary rounded-pill"
-										id="numResultsValue"
-										>{{ default_results }}</span
-									>
-								</label>
-								<input
-									type="range"
-									class="form-range"
-									id="numResults"
-									min="1"
-									max="50"
-									value="{{ default_results }}"
-								/>
-								<div
-									class="d-flex justify-content-between small text-muted mt-1"
-								>
-									<span>1</span>
-									<span>25</span>
-									<span>50</span>
-								</div>
-							</div>
+										<h5 class="mb-3">Search Options</h5>
+										<div class="mb-4 position-relative" id="resultsSliderWrapper">
+											<label for="numResults" class="form-label mb-1">Results to show</label>
+											<div class="range-bubble-container mb-2">
+												<span class="range-bubble" id="numResultsBubble" role="status" aria-live="polite">{{ default_results }}</span>
+											</div>
+											<input
+												type="range"
+												class="form-range results-range"
+												id="numResults"
+												min="1"
+												max="50"
+												value="{{ default_results }}"
+												aria-valuemin="1" aria-valuemax="50" aria-valuenow="{{ default_results }}"
+											/>
+											<div class="d-flex justify-content-between small text-muted mt-1" aria-hidden="true">
+												<span>1</span>
+												<span>25</span>
+												<span>50</span>
+											</div>
+										</div>
 						</section>
 
 						<section class="px-3 mb-4" id="channelsSection">
@@ -93,9 +85,6 @@
 								Failed to load channels.
 							</div>
 							<ul class="list-unstyled channel-list mt-2 d-none" id="channelList" role="list" aria-label="Channels list"></ul>
-							<div class="d-grid mt-2" id="channelsLoadMoreWrapper">
-								<button type="button" class="btn btn-sm btn-outline-primary d-none" id="channelsLoadMoreBtn">Load More</button>
-							</div>
 						</section>
 
 						<footer class="sidebar-footer">
@@ -150,11 +139,14 @@
 							<i class="bi bi-youtube text-danger"></i>
 							YouTube Search
 						</h1>
-						<div class="theme-switch-wrapper">
-							<label class="theme-switch" for="themeSwitch">
+						<div class="theme-switch-wrapper" title="Toggle dark mode" data-bs-toggle="tooltip" data-bs-placement="left">
+							<span class="me-2 small fw-medium d-none d-md-inline" id="themeLabel">Light</span>
+							<label class="theme-switch" for="themeSwitch" aria-label="Toggle dark mode">
 								<input type="checkbox" id="themeSwitch" />
 								<div class="slider round"></div>
 							</label>
+							<i class="bi bi-sun-fill theme-icon sun"></i>
+							<i class="bi bi-moon-stars-fill theme-icon moon d-none"></i>
 						</div>
 					</header>
 
