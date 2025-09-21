@@ -2,7 +2,7 @@
 
 A semantic search engine for your YouTube 'Watch Later' list. This project uses Google's Gemini embedding model to understand the meaning behind your search queries and finds relevant videos from your saved list stored in a ChromaDB vector database.
 
-![Search Interface](images/image.png?)
+![Search Interface](images/image-0.png?)
 ![Search Results](images/image-1.png?)
 ![Video Details](images/image-2.png?)
 
