@@ -9,16 +9,6 @@ class YouTubeService:
     """A service class for interacting with the YouTube Data API v3."""
 
     def __init__(self, api_key: str):
-        """
-        Initializes the YouTubeService.
-
-        Args:
-            api_key (str): The YouTube Data API v3 key.
-
-        Raises:
-            ValueError: If the API key is not provided.
-            Exception: For errors during the YouTube service object build.
-        """
         if not api_key:
             raise ValueError("YouTube API Key not provided.")
         
@@ -31,15 +21,6 @@ class YouTubeService:
             raise
 
     def fetch_video_details(self, video_ids: list[str]) -> list[dict]:
-        """
-        Fetches video details (snippet) for a list of video IDs.
-
-        Args:
-            video_ids (list[str]): A list of YouTube video ID strings.
-
-        Returns:
-            list[dict]: A list of dictionaries with details for each video.
-        """
         if not video_ids:
             return []
 

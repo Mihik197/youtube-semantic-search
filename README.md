@@ -14,6 +14,7 @@ A semantic search engine for your YouTube 'Watch Later' list. This project uses 
 -   **YouTube Data API:** Fetches detailed video information (titles, descriptions, tags, channel).
 -   **Incremental Data Ingestion:** Processes your YouTube 'Watch Later' list from a CSV export, only adding new videos and removing ones that are no longer on the list.
 -   **Web & CLI Interfaces:** Provides both a user-friendly web interface (via Flask) and a command-line interface for searching.
+-   **Optional LLM Re-Ranking:** (Gemini 2.5 Flash) Second-stage relevance ordering with JSON-only output and token usage logging.
 
 ## Architecture
 
@@ -121,6 +122,31 @@ Key configuration options can be found in `src/config.py`:
 -   `EMBEDDING_MODEL_NAME`: The Gemini embedding model to use.
 -   `CHROMA_COLLECTION_NAME`: Name of the collection in ChromaDB.
 -   `DEFAULT_SEARCH_RESULTS`: Default number of search results to display.
+
+### LLM Re-Ranking (Optional)
+
+Enable a two-stage retrieval pipeline: vector similarity candidate generation followed by Gemini model re-ranking of the top N candidates. Controlled via environment variables (set in `.env` or shell):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ENABLE_LLM_RERANK` | `true` | Toggle LLM re-ranking layer. If false, only embedding similarity order is used. |
+| `RERANK_CANDIDATES` | `50` | Number of top vector results passed to the LLM for potential reordering. |
+| `RERANK_MODEL_NAME` | `gemini-2.5-flash-lite` | Gemini generation model for re-ranking (distinct from embedding model). |
+| `RERANK_TIMEOUT_SECONDS` | `18` | Soft timeout budget (used internally for future enhancements). |
+| `RERANK_MAX_DESCRIPTION_CHARS` | `500` | Truncation limit applied per video description to control prompt size. |
+| `RERANK_MAX_TAGS` | `10` | Max tags included per candidate. |
+| `RERANK_INCLUDE_REASONS` | `false` | Reserved for future: request per-item reason strings (higher token cost). |
+| `RERANK_LOG_TOKEN_USAGE` | `true` | Logs token accounting line (`RERANK_TOKENS …`) for each rerank call. |
+
+Runtime Logging:
+- `RERANK …` line reports success/fallback, latency, and candidate count.
+- `RERANK_TOKENS …` line (if enabled) reports `input_tokens`, `output_tokens`, and `total_tokens` (best-effort—fields depend on SDK availability).
+
+Fallback Behavior:
+- On API errors, JSON parse failure, or disabled config, original vector order is preserved; `applied=false` reason logged.
+
+Security / Bias Notes:
+- Embedding similarity scores are intentionally NOT included in the LLM prompt to avoid anchoring bias; only metadata (title, truncated description, tags, channel, published date, duration) is sent.
 
 ## Dependencies
 

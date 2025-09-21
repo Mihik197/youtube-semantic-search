@@ -8,16 +8,6 @@ class VectorDBService:
     """A service class for interacting with a ChromaDB vector database."""
 
     def __init__(self, path: str, collection_name: str):
-        """
-        Initializes the VectorDBService.
-
-        Args:
-            path (str): The path to the ChromaDB persistent storage.
-            collection_name (str): The name of the collection to use.
-        
-        Raises:
-            Exception: For errors during ChromaDB client or collection initialization.
-        """
         print(f"Initializing ChromaDB client at: {path}")
         try:
             self.client = chromadb.PersistentClient(path=path)
