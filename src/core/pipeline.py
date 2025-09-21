@@ -4,6 +4,7 @@ from src.services.youtube_service import YouTubeService
 from src.services.embedding_service import EmbeddingService
 from src.services.vectordb_service import VectorDBService
 from src.services.deleted_videos_archive import archive_deleted_videos
+from src.services.duration_utils import parse_iso8601_duration
 from src.config import (
     YOUTUBE_API_KEY,
     GEMINI_API_KEY,
@@ -105,6 +106,12 @@ class DataIngestionPipeline:
                         processed_metadatas_for_chroma = []
                         for meta_item in metadata_for_storage:
                             processed_item = meta_item.copy()
+                            # Derive numeric duration in seconds if ISO8601 duration present
+                            iso_duration = processed_item.get('duration')
+                            if iso_duration and 'duration_seconds' not in processed_item:
+                                seconds = parse_iso8601_duration(iso_duration)
+                                if seconds is not None:
+                                    processed_item['duration_seconds'] = int(seconds)
                             tags_list = processed_item.get('tags')
                             if isinstance(tags_list, list):
                                 processed_item['tags_str'] = ", ".join(tags_list) if tags_list else ""

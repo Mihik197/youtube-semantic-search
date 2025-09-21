@@ -6,6 +6,7 @@ from typing import List, Dict, Any
 from threading import Lock
 
 from src.services.vectordb_service import VectorDBService
+from src.services.duration_utils import format_watch_time
 from src.config import CHROMA_DB_PATH, CHROMA_COLLECTION_NAME
 
 _UNKNOWN = "(Unknown Channel)"
@@ -51,15 +52,25 @@ class ChannelAggregationService:
                     try:
                         channel = self._normalize_channel(m.get('channel'))
                         thumb = m.get('channel_thumbnail') or None
+                        dur = m.get('duration_seconds')
+                        try:
+                            dur_int = int(dur) if dur is not None else None
+                            if dur_int is not None and dur_int < 0:
+                                dur_int = None
+                        except (TypeError, ValueError):
+                            dur_int = None
                         entry = counts.get(channel)
                         if entry is None:
                             counts[channel] = {
                                 'channel': channel,
                                 'count': 1,
-                                'channel_thumbnail': thumb
+                                'channel_thumbnail': thumb,
+                                'total_duration_seconds': dur_int or 0
                             }
                         else:
                             entry['count'] += 1
+                            if dur_int is not None:
+                                entry['total_duration_seconds'] += dur_int
                             # If we don't yet have a thumbnail stored and this metadata has one, set it
                             if not entry.get('channel_thumbnail') and thumb:
                                 entry['channel_thumbnail'] = thumb
@@ -70,6 +81,12 @@ class ChannelAggregationService:
                     for ch_data in counts.values():
                         percent = (ch_data['count'] / total) * 100 if total else 0
                         ch_data['percent'] = round(percent, 2)
+                        # Derive human readable watch time string
+                        tsec = ch_data.get('total_duration_seconds')
+                        if isinstance(tsec, int) and tsec > 0:
+                            ch_data['watch_time'] = format_watch_time(tsec)
+                        else:
+                            ch_data['watch_time'] = None
                         channels_list.append(ch_data)
                 self._cache = {
                     'total_videos': total,

@@ -354,7 +354,6 @@ body { overflow-y: scroll; }
 	font-weight: 500;
 }
 
-/* Removed channel popularity bars to free space */
 
 .channel-sentinel {
 	list-style: none;

@@ -482,7 +482,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     ui.channelList.appendChild(li);
                 } else {
                     const existingChannels = new Set(Array.from(ui.channelList.querySelectorAll('li.channel-item')).map(li => li.getAttribute('data-channel')));
-                    filtered.forEach(ch => {
+                        filtered.forEach(ch => {
                         if (!rebuild && existingChannels.has(ch.channel)) return;
                         const li = document.createElement('li');
                         li.className = 'channel-item';
@@ -540,7 +540,16 @@ document.addEventListener("DOMContentLoaded", () => {
                     const data = await resp.json();
                     App.Results.render(data.results || []);
                     const headerEl = document.getElementById('resultsHeader');
-                    if (headerEl) headerEl.textContent = `${channel} (${data.count ?? data.results.length} videos)`;
+                    if (headerEl) {
+                        // Attempt to find watch_time for the active channel from cached channel list
+                        let wt = null;
+                        try {
+                            const st = App.state.channel;
+                            const found = st.dataCache.channels.find(c => c.channel === channel);
+                            wt = found && found.watch_time ? found.watch_time : null;
+                        } catch(e) {}
+                        headerEl.textContent = `${channel} (${data.count ?? data.results.length} videos${wt ? ' • ' + wt : ''})`;
+                    }
                 } catch (e) {
                     console.error('Failed to load channel videos', e);
                 } finally {

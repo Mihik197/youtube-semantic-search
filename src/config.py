@@ -1,8 +1,6 @@
-# src/config.py
 import os
 from dotenv import load_dotenv
 
-# This makes all file paths independent of where the script is run from
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 load_dotenv(os.path.join(ROOT_DIR, '.env'))
@@ -26,13 +24,11 @@ EMBEDDING_API_DELAY = 15.1
 CHROMA_COLLECTION_NAME = "youtube_videos_gemini_std_v2"
 CHROMA_BATCH_SIZE = 100
 
-# --- Search Settings ---
 DEFAULT_SEARCH_RESULTS = 40
 
 # --- Input Data Configuration ---
 POSSIBLE_VIDEO_ID_COLUMNS = ['Video ID', 'videoId', 'VIDEO_ID', 'Content ID']
 
-# --- Validation ---
 def validate_config():
     """Validates the essential configuration variables."""
     if not YOUTUBE_API_KEY:
