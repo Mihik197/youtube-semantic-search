@@ -34,7 +34,9 @@ class VectorDBService:
         Returns:
             tuple[int, int]: A tuple of (added_count, skipped_count).
         """
-        if not all([embeddings, ids, metadatas, documents]):
+        # Defensive length checks to avoid numpy array ambiguous truth values
+        if (len(embeddings) == 0 or len(ids) == 0 or 
+            len(metadatas) == 0 or len(documents) == 0):
             print("Warning: Empty lists provided for ChromaDB storage. Skipping.")
             return 0, 0
 
@@ -123,9 +125,13 @@ class VectorDBService:
                         offset=offset,
                         limit=min(batch_size, total - offset)
                     )
-                    batch_metas = batch.get('metadatas', []) or []
+                    batch_metas = batch.get('metadatas', [])
+                    if batch_metas is None:
+                        batch_metas = []
                     if include_ids:
-                        batch_ids = batch.get('ids', []) or []
+                        batch_ids = batch.get('ids', [])
+                        if batch_ids is None:
+                            batch_ids = []
                         for i, m in enumerate(batch_metas):
                             if isinstance(m, dict):
                                 m = m.copy()
@@ -162,9 +168,15 @@ class VectorDBService:
                 include=['metadatas', 'ids', 'documents'],
                 limit=limit
             )
-            metadatas = raw.get('metadatas', []) or []
-            ids = raw.get('ids', []) or []
-            docs = raw.get('documents', []) or []
+            metadatas = raw.get('metadatas', [])
+            if metadatas is None:
+                metadatas = []
+            ids = raw.get('ids', [])
+            if ids is None:
+                ids = []
+            docs = raw.get('documents', [])
+            if docs is None:
+                docs = []
             videos = []
             for i, m in enumerate(metadatas):
                 if not isinstance(m, dict):
@@ -206,10 +218,18 @@ class VectorDBService:
             subset = ids[i:i+batch_size]
             try:
                 batch = self.collection.get(ids=subset, include=['embeddings', 'metadatas', 'documents'])
-                got_ids = batch.get('ids', []) or []
-                mets = batch.get('metadatas', []) or []
-                embs = batch.get('embeddings', []) or []
-                docs = batch.get('documents', []) or []
+                got_ids = batch.get('ids', [])
+                if got_ids is None:
+                    got_ids = []
+                mets = batch.get('metadatas', [])
+                if mets is None:
+                    mets = []
+                embs = batch.get('embeddings', [])
+                if embs is None:
+                    embs = []
+                docs = batch.get('documents', [])
+                if docs is None:
+                    docs = []
                 for j, vid in enumerate(got_ids):
                     out[vid] = {
                         'embedding': embs[j] if j < len(embs) else None,
@@ -366,8 +386,12 @@ class VectorDBService:
                 print(f"Warning: failed to fetch metadata batch for update ({len(subset)} ids): {e}")
                 skipped_missing += len(subset)
                 continue
-            got_ids = existing.get('ids', []) or []
-            existing_mets = existing.get('metadatas', []) or []
+            got_ids = existing.get('ids', [])
+            if got_ids is None:
+                got_ids = []
+            existing_mets = existing.get('metadatas', [])
+            if existing_mets is None:
+                existing_mets = []
             existing_map = {}
             for j, vid in enumerate(got_ids):
                 base = existing_mets[j] if j < len(existing_mets) and isinstance(existing_mets[j], dict) else {}

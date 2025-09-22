@@ -23,6 +23,7 @@ document.addEventListener("DOMContentLoaded", () => {
             this.Search.init();
             this.Modal.init();
             this.Channels.init();
+            this.Topics.init();
         },
         cacheDom() {
             this.ui = {
@@ -52,6 +53,12 @@ document.addEventListener("DOMContentLoaded", () => {
                 channelList: document.getElementById("channelList"),
                 channelsLoading: document.getElementById("channelsLoading"),
                 channelsError: document.getElementById("channelsError")
+                , topicList: document.getElementById('topicList')
+                , topicsLoading: document.getElementById('topicsLoading')
+                , topicsError: document.getElementById('topicsError')
+                , toggleNoiseTopics: document.getElementById('toggleNoiseTopics')
+                , topicSortSizeDesc: document.getElementById('topicSortSizeDesc')
+                , topicSortAlpha: document.getElementById('topicSortAlpha')
             };
         },
         Utils: {
@@ -552,6 +559,110 @@ document.addEventListener("DOMContentLoaded", () => {
                     }
                 } catch (e) {
                     console.error('Failed to load channel videos', e);
+                } finally {
+                    App.Utils.setLoading(false);
+                }
+            }
+        }
+        , Topics: {
+            state: { sort: 'size_desc', includeNoise: false, loading: false, clusters: [], active: null },
+            init() {
+                const ui = App.ui;
+                if (!ui.topicList) return;
+                this.bindSort();
+                this.bindNoiseToggle();
+                this.fetch();
+            },
+            bindSort() {
+                const ui = App.ui; const st = this.state;
+                ui.topicSortSizeDesc?.addEventListener('click', () => { if (st.loading) return; st.sort = 'size_desc'; ui.topicSortSizeDesc.classList.add('active'); ui.topicSortAlpha.classList.remove('active'); this.fetch(); });
+                ui.topicSortAlpha?.addEventListener('click', () => { if (st.loading) return; if (st.sort === 'alpha') { st.sort = 'alpha_desc'; ui.topicSortAlpha.innerHTML = '<i class="bi bi-sort-alpha-up"></i>'; } else { st.sort = 'alpha'; ui.topicSortAlpha.innerHTML = '<i class="bi bi-sort-alpha-down"></i>'; } ui.topicSortAlpha.classList.add('active'); ui.topicSortSizeDesc.classList.remove('active'); this.fetch(); });
+            },
+            bindNoiseToggle() {
+                const ui = App.ui; const st = this.state;
+                if (ui.toggleNoiseTopics) {
+                    ui.toggleNoiseTopics.addEventListener('change', () => { st.includeNoise = ui.toggleNoiseTopics.checked; this.fetch(); });
+                }
+            },
+            async fetch() {
+                const ui = App.ui; const st = this.state;
+                st.loading = true;
+                ui.topicsError?.classList.add('d-none');
+                ui.topicsLoading?.classList.remove('d-none');
+                ui.topicList?.classList.add('d-none');
+                try {
+                    const resp = await fetch(`/topics?sort=${encodeURIComponent(st.sort)}&include_noise=${st.includeNoise}`);
+                    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                    const data = await resp.json();
+                    st.clusters = data.clusters || [];
+                    this.render();
+                } catch (e) {
+                    console.error('Failed to load topics', e);
+                    ui.topicsError?.classList.remove('d-none');
+                } finally {
+                    ui.topicsLoading?.classList.add('d-none');
+                    st.loading = false;
+                }
+            },
+            render() {
+                const ui = App.ui; const st = this.state;
+                if (!ui.topicList) return;
+                ui.topicList.innerHTML = '';
+                if (st.clusters.length === 0) {
+                    const li = document.createElement('li');
+                    li.className = 'topic-item';
+                    li.textContent = 'No topics available';
+                    ui.topicList.appendChild(li);
+                } else {
+                    const total = st.clusters.reduce((a,c) => a + (c.size||0), 0) || 1;
+                    st.clusters.forEach(c => {
+                        const li = document.createElement('li');
+                        li.className = 'topic-item';
+                        li.setAttribute('data-topic-id', c.id);
+                        li.setAttribute('tabindex', '0');
+                        const pct = Math.min(100, Math.max(0, c.percent ?? (c.size/total*100)));
+                        const kws = (c.top_keywords || []).slice(0,3).join(', ');
+                        li.innerHTML = `
+                            <div class="topic-bar-wrapper w-100">
+                                <div class="flex-grow-1 text-truncate" title="${App.Utils.escapeHtml(c.label)}">${App.Utils.escapeHtml(c.label)}</div>
+                                <span class="badge bg-secondary-subtle text-secondary-emphasis topic-count" title="Videos in topic">${c.size}</span>
+                            </div>
+                            <div class="topic-bar w-100 mt-1" aria-label="${pct.toFixed(2)}% of corpus"><span style="width:${pct.toFixed(2)}%"></span></div>
+                            <div class="topic-kws" title="${App.Utils.escapeHtml(kws)}">${App.Utils.escapeHtml(kws)}</div>`;
+                        li.addEventListener('click', () => this.select(c.id, li));
+                        li.addEventListener('keydown', (ev) => { if (ev.key==='Enter' || ev.key===' ') { ev.preventDefault(); this.select(c.id, li); } });
+                        ui.topicList.appendChild(li);
+                    });
+                }
+                ui.topicList.classList.remove('d-none');
+            },
+            async select(clusterId, li) {
+                const ui = App.ui; const st = this.state;
+                ui.topicList.querySelectorAll('.topic-item').forEach(el => el.classList.remove('active'));
+                if (li) li.classList.add('active');
+                st.active = clusterId;
+                try {
+                    App.Utils.setLoading(true);
+                    const resp = await fetch(`/topics/${clusterId}`);
+                    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                    const data = await resp.json();
+                    const vids = data.videos || [];
+                    App.Results.render(vids.map(v => ({
+                        id: v.id,
+                        title: v.title,
+                        channel: v.channel,
+                        channel_thumbnail: null,
+                        channel_id: null,
+                        url: v.url,
+                        score: 0.0,
+                        thumbnail: v.thumbnail,
+                        document: '',
+                        metadata: v
+                    })));
+                    const headerEl = document.getElementById('resultsHeader');
+                    if (headerEl) headerEl.textContent = `Topic: ${data.cluster?.label || clusterId} (${vids.length})`;
+                } catch (e) {
+                    console.error('Failed to load topic detail', e);
                 } finally {
                     App.Utils.setLoading(false);
                 }

@@ -1,8 +1,13 @@
 pandas
 google-api-python-client
 google-genai
+pydantic
 chromadb
 tqdm
 python-dotenv
 streamlit
 flask
+scikit-learn
+hdbscan
+# umap-learn
+pytest

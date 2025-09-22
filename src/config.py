@@ -27,14 +27,14 @@ CHROMA_BATCH_SIZE = 100
 DEFAULT_SEARCH_RESULTS = 40
 
 # --- LLM Re-Ranking Configuration ---
-ENABLE_LLM_RERANK = 'true'
+ENABLE_LLM_RERANK = True
 RERANK_CANDIDATES = int('50')
 RERANK_MODEL_NAME = 'gemini-2.5-flash-lite'
 RERANK_TIMEOUT_SECONDS = int('18')
 # Truncation limits for prompt token control.
 RERANK_MAX_DESCRIPTION_CHARS = int('500')
 RERANK_MAX_TAGS = int('10')
-RERANK_LOG_TOKEN_USAGE = 'true'
+RERANK_LOG_TOKEN_USAGE = True
 
 # --- Input Data Configuration ---
 POSSIBLE_VIDEO_ID_COLUMNS = ['Video ID', 'videoId', 'VIDEO_ID', 'Content ID']
@@ -54,3 +54,24 @@ def validate_config():
     return True
 
 IS_CONFIG_VALID = validate_config()
+
+# --- Topic Clustering Configuration (HDBSCAN) ---
+ENABLE_TOPIC_CLUSTERING = True
+TOPIC_CLUSTERING_MIN_CLUSTER_SIZE_FLOOR = 5
+TOPIC_CLUSTERING_MIN_CLUSTER_SIZE_MAX = 150
+TOPIC_CLUSTERING_SAMPLE_VALIDITY_MAX = 1000  # sample size for silhouette fallback
+TOPIC_CLUSTERING_LABEL_MAX_KEYWORDS = 4
+TOPIC_CLUSTERING_SNAPSHOT_PATH = os.path.join(ROOT_DIR, 'data', 'topic_clusters.json')
+TOPIC_CLUSTERING_ENABLE_LLM_LABELS = False  # set True to use LLM labels
+TOPIC_CLUSTERING_DEBUG = True  # verbose clustering diagnostics
+TOPIC_CLUSTERING_LLM_MODEL = 'gemini-2.5-flash-lite'
+TOPIC_CLUSTERING_DIM_REDUCTION = 'pca'  # 'none' | 'pca' (future: 'umap')
+TOPIC_CLUSTERING_PCA_MAX_COMPONENTS = 50
+TOPIC_CLUSTERING_PCA_VARIANCE_THRESHOLD = 0.90
+TOPIC_CLUSTERING_SHOW_NOISE = False  # UI default: hide noise cluster
+TOPIC_CLUSTERING_MAX_EXEMPLAR_TITLE_CHARS = 140
+TOPIC_CLUSTERING_REBUILD_ON_START_IF_MISSING = True
+TOPIC_CLUSTERING_MAX_MICRO_CLUSTER_SIZE = 2  # for optional UI aggregation only
+TOPIC_CLUSTERING_NOISE_RATIO_RETRY_THRESHOLD = 0.40
+TOPIC_CLUSTERING_LOW_CLUSTER_COUNT_RETRY_THRESHOLD = 2
+TOPIC_CLUSTERING_ADAPTIVE_MIN_SAMPLES_FACTOR = 0.75  # multiply min_samples when retrying due to high noise

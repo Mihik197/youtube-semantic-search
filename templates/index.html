@@ -87,6 +87,31 @@
 							<ul class="list-unstyled channel-list mt-2 d-none" id="channelList" role="list" aria-label="Channels list"></ul>
 						</section>
 
+						<section class="px-3 mb-4" id="topicsSection">
+							<div class="d-flex align-items-center mb-2 gap-2 topic-header-row">
+								<h5 class="mb-0 flex-grow-1 text-truncate" title="Topics">Topics</h5>
+								<div class="btn-group btn-group-sm" role="group" aria-label="Topic sorting" id="topicSortButtons">
+									<button type="button" class="btn btn-outline-secondary active" id="topicSortSizeDesc" data-mode="size_desc" title="Sort by size" aria-label="Sort by size descending">
+										<i class="bi bi-diagram-3"></i>
+									</button>
+									<button type="button" class="btn btn-outline-secondary" id="topicSortAlpha" data-mode="alpha" title="Sort alphabetically" aria-label="Sort alphabetically">
+										<i class="bi bi-sort-alpha-down"></i>
+									</button>
+								</div>
+							</div>
+							<div class="form-check form-switch form-switch-sm mb-2">
+								<input class="form-check-input" type="checkbox" role="switch" id="toggleNoiseTopics" aria-label="Toggle noise/outlier topics" />
+								<label class="form-check-label small" for="toggleNoiseTopics">Show noise</label>
+							</div>
+							<div id="topicsLoading" class="topic-skeleton-list d-none">
+								<div class="topic-skeleton"></div>
+								<div class="topic-skeleton"></div>
+								<div class="topic-skeleton"></div>
+							</div>
+							<div id="topicsError" class="alert alert-danger d-none small" role="alert">Failed to load topics.</div>
+							<ul class="list-unstyled topic-list d-none" id="topicList" role="list" aria-label="Topics list"></ul>
+						</section>
+
 						<footer class="sidebar-footer">
 							<div
 								class="status-card p-3 mb-3 {% if collection_empty %}bg-warning{% else %}bg-success text-white{% endif %}"

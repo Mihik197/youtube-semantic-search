@@ -24,6 +24,7 @@ from src.core.search import search_videos
 from src.services.rerank_service import CandidateVideo, RerankService
 from src.services.vectordb_service import VectorDBService
 from src.services.channel_service import get_channel_aggregation_service
+from src.services.topic_clustering_service import get_topic_clustering_service
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -233,5 +234,48 @@ def channel_videos():
     return jsonify({"results": shaped, "count": len(shaped), "channel": channel})
 
 
+@app.route("/topics", methods=["GET"])
+def topics():
+    svc = get_topic_clustering_service()
+    sort = request.args.get('sort', 'size_desc')
+    include_noise = request.args.get('include_noise', 'false').lower() == 'true'
+    try:
+        limit = request.args.get('limit')
+        limit_int = int(limit) if limit is not None else None
+    except (TypeError, ValueError):
+        limit_int = None
+    try:
+        offset_int = int(request.args.get('offset', '0'))
+    except (TypeError, ValueError):
+        offset_int = 0
+    data = svc.get_topics(sort=sort, include_noise=include_noise, limit=limit_int, offset=offset_int)
+    return jsonify(data)
+
+
+@app.route("/topics/<int:cluster_id>", methods=["GET"])
+def topic_detail(cluster_id: int):
+    svc = get_topic_clustering_service()
+    data = svc.get_cluster(cluster_id)
+    if 'error' in data:
+        return jsonify(data), 404
+    return jsonify(data)
+
+
+@app.route("/topics/rebuild", methods=["POST"])
+def topics_rebuild():
+    svc = get_topic_clustering_service()
+    force = request.args.get('force', 'false').lower() == 'true'
+    try:
+        snap = svc.rebuild(force=force)
+        return jsonify({"status": "ok", "snapshot": {
+            "generated_at": snap.get('generated_at'),
+            "cluster_count": snap.get('cluster_count'),
+            "noise_ratio": snap.get('noise_ratio'),
+            "total_videos": snap.get('total_videos')
+        }})
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=5000)
+    app.run(debug=True, use_reloader=False, host="0.0.0.0", port=5000)
