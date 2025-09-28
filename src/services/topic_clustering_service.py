@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import time
-from dataclasses import dataclass
 from threading import Lock
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -23,12 +22,10 @@ try:  # pragma: no cover - optional dependency
 except ImportError:  # pragma: no cover - optional dependency
     hdbscan = None
 
-
-@dataclass
-class ClusterMetrics:
+class ClusterMetrics(BaseModel):
     count: int
     noise_ratio: float
-    validity: Optional[float]
+    validity: Optional[float] = None
     duration: float
     selection: str
 
@@ -218,7 +215,7 @@ class TopicClusteringService:
         started: float,
     ) -> ClusterMetrics:
         if labels.size == 0:
-            return ClusterMetrics(0, 0.0, None, 0.0, selection)
+            return ClusterMetrics(count=0, noise_ratio=0.0, validity=None, duration=0.0, selection=selection)
         noise_mask = labels == -1
         cluster_ids = [cid for cid in np.unique(labels) if cid != -1]
         noise_ratio = float(np.sum(noise_mask)) / labels.size if labels.size else 0.0
@@ -245,7 +242,13 @@ class TopicClusteringService:
                 sel=selection,
             )
         )
-        return ClusterMetrics(len(cluster_ids), noise_ratio, validity, elapsed, selection)
+        return ClusterMetrics(
+            count=len(cluster_ids),
+            noise_ratio=noise_ratio,
+            validity=validity,
+            duration=elapsed,
+            selection=selection,
+        )
 
     # ------------------------------------------------------------------
     # Cluster labelling + snapshot construction
@@ -425,7 +428,13 @@ class TopicClusteringService:
                 params["min_samples"] = max(3, int(params["min_cluster_size"] * 0.35))
 
             if not best_state:
-                empty_metrics = ClusterMetrics(0, 0.0, None, time.time() - start, selection)
+                empty_metrics = ClusterMetrics(
+                    count=0,
+                    noise_ratio=0.0,
+                    validity=None,
+                    duration=time.time() - start,
+                    selection=selection,
+                )
                 snapshot = self._build_snapshot(ids, np.array([]), None, empty_metrics, params, pca_info, {})
                 self.save_snapshot(snapshot)
                 return snapshot

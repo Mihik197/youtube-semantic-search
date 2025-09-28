@@ -7,7 +7,6 @@ from __future__ import annotations
 import hashlib
 import logging
 import time
-from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set
 
 from pydantic import BaseModel, Field
@@ -52,8 +51,7 @@ logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 
 
-@dataclass
-class CandidateVideo:
+class CandidateVideo(BaseModel):
     id: str
     title: str
     description: Optional[str] = None
