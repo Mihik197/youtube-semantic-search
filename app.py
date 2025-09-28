@@ -32,12 +32,22 @@ logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 
 
+def parse_int(value: Any, default: int, *, minimum: Optional[int] = None, maximum: Optional[int] = None) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return default
+    if minimum is not None:
+        number = max(minimum, number)
+    if maximum is not None:
+        number = min(maximum, number)
+    return number
+
+
 def cosine_distance_to_similarity(distance: Optional[float]) -> float:
     if distance is None:
         return 0.0
-    if distance < 0 or distance > 2:
-        return 0.0
-    return 1.0 - distance
+    return max(0.0, min(1.0, 1.0 - distance))
 
 
 # Initialize VectorDBService at startup — let any genuine errors surface early.
@@ -96,71 +106,58 @@ def index():
 
 @app.route("/search", methods=["POST"])
 def search():
-    if not request.json:
-        return jsonify({"error": "No search parameters provided"}), 400
-
-    query = (request.json.get("query") or "").strip()
-    try:
-        display_n = int(request.json.get("num_results", DEFAULT_SEARCH_RESULTS))
-    except (TypeError, ValueError):
-        display_n = DEFAULT_SEARCH_RESULTS
-    display_n = max(display_n, 1)
-
+    payload = request.get_json(silent=True) or {}
+    query = (payload.get("query") or "").strip()
     if not query:
         return jsonify({"error": "No search query provided"}), 400
 
+    display_n = parse_int(payload.get("num_results"), DEFAULT_SEARCH_RESULTS, minimum=1)
     retrieve_n = max(display_n, RERANK_CANDIDATES if ENABLE_LLM_RERANK else display_n)
-    search_results = search_videos(query, n_results=retrieve_n)
+    search_results = search_videos(query, n_results=retrieve_n) or {}
 
-    if not search_results or not search_results.get("ids") or not search_results["ids"][0]:
+    ids = (search_results.get("ids") or [[]])[0]
+    if not ids:
         return jsonify({"results": [], "message": "No matching videos found"})
 
-    result_ids = search_results["ids"][0]
-    distances = search_results["distances"][0]
-    metadatas = search_results["metadatas"][0]
-    documents = search_results.get("documents", [[]])[0]
+    distances = (search_results.get("distances") or [[]])[0]
+    metadatas = (search_results.get("metadatas") or [[]])[0]
+    documents = (search_results.get("documents") or [[]])[0]
 
     candidates: List[Dict[str, Any]] = []
     candidate_video_objs: List[CandidateVideo] = []
-
-    for i, rid in enumerate(result_ids):
-        meta = metadatas[i]
-        dist = distances[i]
-        doc_text = documents[i] if i < len(documents) else ""
-        vid = meta.get("id") or rid
-        candidates.append(build_candidate_response(i, vid, meta, dist, doc_text))
-        candidate_video_objs.append(build_candidate_video(i, vid, meta, dist, doc_text))
+    for idx, result_id in enumerate(ids):
+        meta = metadatas[idx]
+        doc = documents[idx] if idx < len(documents) else ""
+        distance = distances[idx] if idx < len(distances) else None
+        video_id = meta.get("id") or result_id
+        candidates.append(build_candidate_response(idx, video_id, meta, distance, doc))
+        candidate_video_objs.append(build_candidate_video(idx, video_id, meta, distance, doc))
 
     rerank_info: Dict[str, Any] = {"enabled": bool(ENABLE_LLM_RERANK), "applied": False}
 
     if ENABLE_LLM_RERANK and GEMINI_API_KEY:
         service = RerankService(api_key=GEMINI_API_KEY)
         rr = service.rerank(query, candidate_video_objs)
-        rerank_info.update({
-            "applied": rr.get("applied", False),
-            "model": rr.get("model"),
-            "latency_ms": rr.get("latency_ms"),
-            "reason": rr.get("reason"),
-            "candidate_count": len(candidates),
-        })
-        order = rr.get("ordered_ids", [])
-        order_index = {vid: idx for idx, vid in enumerate(order)}
+        rerank_info.update(
+            {
+                "applied": rr.get("applied", False),
+                "model": rr.get("model"),
+                "latency_ms": rr.get("latency_ms"),
+                "reason": rr.get("reason"),
+                "candidate_count": len(candidates),
+            }
+        )
+        order_index = {vid: pos for pos, vid in enumerate(rr.get("ordered_ids", []))}
         if rr.get("applied"):
-            candidates.sort(key=lambda c: order_index.get(c["id"], 10 ** 9))
-            for idx, c in enumerate(candidates):
-                c["rerank_position"] = idx + 1
-        else:
-            for c in candidates:
-                c["rerank_position"] = c["original_rank"]
-
+            candidates.sort(key=lambda item: order_index.get(item["id"], 10**9))
         llm_scores = rr.get("llm_scores") or {}
-        if llm_scores:
-            for c in candidates:
-                if c["id"] in llm_scores:
-                    c["llm_score"] = llm_scores[c["id"]]
+        for pos, candidate in enumerate(candidates, start=1):
+            candidate["rerank_position"] = pos if rr.get("applied") else candidate["original_rank"]
+            if candidate["id"] in llm_scores:
+                candidate["llm_score"] = llm_scores[candidate["id"]]
     else:
-        for c in candidates:
-            c["rerank_position"] = c["original_rank"]
+        for candidate in candidates:
+            candidate["rerank_position"] = candidate["original_rank"]
 
     final_results = candidates[:display_n]
     return jsonify({"results": final_results, "count": len(final_results), "rerank": rerank_info})
@@ -185,21 +182,9 @@ def channels():
 
     q = request.args.get("q", None)
 
-    limit_param = request.args.get("limit")
-    limit: Optional[int] = None
-    if limit_param is not None:
-        try:
-            limit = int(limit_param)
-        except (TypeError, ValueError):
-            limit = None
-    if limit is not None:
-        limit = min(max(limit, 0), 500)
-
-    try:
-        offset = int(request.args.get("offset", "0"))
-    except (TypeError, ValueError):
-        offset = 0
-    offset = max(offset, 0)
+    limit_arg = request.args.get("limit")
+    limit: Optional[int] = None if limit_arg is None else parse_int(limit_arg, 0, minimum=0, maximum=500)
+    offset = parse_int(request.args.get("offset", 0), 0, minimum=0)
 
     svc = get_channel_aggregation_service()
     data = svc.get_channels(sort=sort, limit=limit, offset=offset, q=q)
@@ -212,25 +197,26 @@ def channel_videos():
     if not channel:
         return jsonify({"error": "channel parameter required"}), 400
 
-    vectordb = VectorDBService(path=CHROMA_DB_PATH, collection_name=CHROMA_COLLECTION_NAME)
-    videos = vectordb.get_videos_by_channel(channel)
+    videos = vectordb_service.get_videos_by_channel(channel)
 
-    shaped: List[Dict[str, Any]] = []
-    for v in videos:
-        vid = v.get("id") or v.get("video_id")
-        shaped.append({
-            "id": vid,
-            "title": v.get("title", "N/A"),
-            "channel": v.get("channel", channel),
-            "channel_id": v.get("channel_id"),
-            "url": v.get("url", f"https://www.youtube.com/watch?v={vid}" if vid else "#"),
-            "score": 0.0,
-            "thumbnail": f"https://img.youtube.com/vi/{vid}/hqdefault.jpg" if vid else None,
-            "channel_thumbnail": v.get("channel_thumbnail"),
-            "tags": v.get("tags_str", ""),
-            "document": v.get("document", ""),
-            "metadata": v,
-        })
+    shaped = []
+    for meta in videos:
+        vid = meta.get("id") or meta.get("video_id")
+        shaped.append(
+            {
+                "id": vid,
+                "title": meta.get("title", "N/A"),
+                "channel": meta.get("channel", channel),
+                "channel_id": meta.get("channel_id"),
+                "url": meta.get("url") or (f"https://www.youtube.com/watch?v={vid}" if vid else "#"),
+                "score": 0.0,
+                "thumbnail": f"https://img.youtube.com/vi/{vid}/hqdefault.jpg" if vid else None,
+                "channel_thumbnail": meta.get("channel_thumbnail"),
+                "tags": meta.get("tags_str", ""),
+                "document": meta.get("document", ""),
+                "metadata": meta,
+            }
+        )
     return jsonify({"results": shaped, "count": len(shaped), "channel": channel})
 
 
@@ -239,15 +225,9 @@ def topics():
     svc = get_topic_clustering_service()
     sort = request.args.get('sort', 'size_desc')
     include_noise = request.args.get('include_noise', 'false').lower() == 'true'
-    try:
-        limit = request.args.get('limit')
-        limit_int = int(limit) if limit is not None else None
-    except (TypeError, ValueError):
-        limit_int = None
-    try:
-        offset_int = int(request.args.get('offset', '0'))
-    except (TypeError, ValueError):
-        offset_int = 0
+    limit_arg = request.args.get('limit')
+    limit_int = None if limit_arg is None else parse_int(limit_arg, 0, minimum=0)
+    offset_int = parse_int(request.args.get('offset', 0), 0, minimum=0)
     data = svc.get_topics(sort=sort, include_noise=include_noise, limit=limit_int, offset=offset_int)
     return jsonify(data)
 

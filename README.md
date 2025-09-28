@@ -12,8 +12,9 @@ A semantic search engine for your YouTube 'Watch Later' list. This project uses 
 -   **Google Gemini Embeddings:** Uses the `models/text-embedding-004` model for generating high-quality vector embeddings of video metadata.
 -   **ChromaDB Integration:** Stores and efficiently searches through video embeddings.
 -   **YouTube Data API:** Fetches detailed video information (titles, descriptions, tags, channel).
--   **Incremental Data Ingestion:** Processes your YouTube 'Watch Later' list from a CSV export, only adding new videos and removing ones that are no longer on the list.
--   **Web & CLI Interfaces:** Provides both a user-friendly web interface (via Flask) and a command-line interface for searching.
+-   **Incremental Data Ingestion:** Processes your YouTube 'Watch Later' list from a CSV export, only adding new videos and pruning items that are no longer on the list.
+-   **Web & CLI Interfaces:** Use the Flask UI or the streamlined terminal search tool.
+-   **Topic & Channel Insights:** Built-in clustering and aggregation to explore your queue by theme or channel.
 -   **Optional LLM Re-Ranking:** (Gemini 2.5 Flash) Second-stage relevance ordering with JSON-only output and token usage logging.
 
 ## Architecture
@@ -27,9 +28,11 @@ The project is organized into a `src` directory containing the core application 
 │   │   ├── pipeline.py       # The main data ingestion pipeline
 │   │   └── search.py         # The core search logic
 │   ├── services/
-│   │   ├── embedding_service.py # Service for generating Gemini embeddings
-│   │   ├── vectordb_service.py  # Service for interacting with ChromaDB
-│   │   └── youtube_service.py   # Service for interacting with the YouTube API
+│   │   ├── embedding_service.py       # Minimal Gemini embedding wrapper
+│   │   ├── vectordb_service.py        # Lightweight ChromaDB helper
+│   │   ├── channel_service.py         # Cached channel aggregation
+│   │   ├── topic_clustering_service.py# Topic discovery snapshot builder
+│   │   └── youtube_service.py         # YouTube Data API fetch utilities
 │   └── config.py             # Configuration settings
 ├── app.py                  # Entry point for the Flask web application
 ├── cli_app.py              # Entry point for the command-line interface
@@ -71,10 +74,10 @@ The project is organized into a `src` directory containing the core application 
 
     -   Create a `.env` file in the root directory.
     -   Add your API keys to the `.env` file:
-        ```env
-        YOUTUBE_API_KEY="YOUR_YOUTUBE_API_KEY"
-        GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
-        ```
+    ```env
+    YOUTUBE_API_KEY="YOUR_YOUTUBE_API_KEY"
+    GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
+    ```
     -   You can obtain a YouTube API key from the [Google Cloud Console](https://console.cloud.google.com/).
     -   You can obtain a Gemini API key from [Google AI Studio](https://aistudio.google.com/app/apikey).
 
@@ -135,7 +138,6 @@ Enable a two-stage retrieval pipeline: vector similarity candidate generation fo
 | `RERANK_TIMEOUT_SECONDS` | `18` | Soft timeout budget (used internally for future enhancements). |
 | `RERANK_MAX_DESCRIPTION_CHARS` | `500` | Truncation limit applied per video description to control prompt size. |
 | `RERANK_MAX_TAGS` | `10` | Max tags included per candidate. |
-| `RERANK_INCLUDE_REASONS` | `false` | Reserved for future: request per-item reason strings (higher token cost). |
 | `RERANK_LOG_TOKEN_USAGE` | `true` | Logs token accounting line (`RERANK_TOKENS …`) for each rerank call. |
 
 Runtime Logging:
@@ -147,6 +149,12 @@ Fallback Behavior:
 
 Security / Bias Notes:
 - Embedding similarity scores are intentionally NOT included in the LLM prompt to avoid anchoring bias; only metadata (title, truncated description, tags, channel, published date, duration) is sent.
+
+### Topic Clustering & Channel Explorer
+
+- The `/topics` endpoint (and UI tab) surfaces HDBSCAN clusters complete with exemplar videos, keywords, and noise statistics.
+- Clustering snapshots are cached to `data/topic_clusters.json` and auto-rebuilt when the vector store changes; trigger a fresh build anytime via `POST /topics/rebuild` or by running the ingestion pipeline.
+- `/channels` returns cached channel aggregates with watch-time summaries and supports `sort`, `limit`, `offset`, and fuzzy `q` filtering.
 
 ## Dependencies
 

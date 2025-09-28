@@ -4,24 +4,49 @@ Reranking service using Gemini's structured output with Pydantic models.
 
 from __future__ import annotations
 
-import time
 import hashlib
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set
 
-from google import genai
-from google.genai import types
+from pydantic import BaseModel, Field
 
 from src import config
-from src.services.rerank_utils import (
-    SYSTEM_PROMPT,
-    RankingInput,
-    RankingOutput,
-    VideoCandidate,
-    truncate_text,
-    log_token_usage,
-)
+from src.services.llm_service import LLMService, log_usage, summarize_usage
+from src.services.prompts import build_rerank_prompt
+
+
+class RankedVideo(BaseModel):
+    id: str = Field(description="Video ID from candidates")
+    score: Optional[float] = Field(default=None, description="Relevance score 0-1")
+
+
+class RankingOutput(BaseModel):
+    ranked: List[RankedVideo] = Field(description="Videos ordered by relevance")
+
+
+class VideoCandidate(BaseModel):
+    id: str
+    title: str
+    channel: str = ""
+    published: str = ""
+    duration_seconds: Optional[int] = None
+    tags: List[str] = Field(default_factory=list)
+    description: str = ""
+
+
+class RankingInput(BaseModel):
+    query: str = Field(description="User search query")
+    candidates: List[VideoCandidate] = Field(description="Videos to rank")
+
+
+def truncate_text(text: Optional[str], limit: int) -> str:
+    if not text:
+        return ""
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + "…"
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
@@ -50,7 +75,8 @@ class RerankService:
         if not api_key:
             raise ValueError("Gemini API key required for reranking.")
         self.model_name = model_name or config.RERANK_MODEL_NAME
-        self.client = genai.Client(api_key=api_key)
+        self.temperature = getattr(config, "RERANK_TEMPERATURE", 0.2)
+        self.llm = LLMService(api_key, self.model_name, temperature=self.temperature)
 
     def _build_ranking_input(self, query: str, candidates: List[CandidateVideo]) -> RankingInput:
         """Convert CandidateVideo list to structured RankingInput."""
@@ -90,69 +116,54 @@ class RerankService:
 
         # Build structured input
         ranking_input = self._build_ranking_input(query, candidates)
-        
-        # Prepare prompt with structured data
-        prompt = (
-            f"{SYSTEM_PROMPT}\n\n"
-            f"Query: {ranking_input.query}\n\n"
-            f"Candidates to rank:\n{ranking_input.model_dump_json(indent=2)}\n\n"
-            "Rank these videos by relevance to the query."
-        )
+        ranking_json = ranking_input.model_dump_json(indent=2)
+        prompt = build_rerank_prompt(ranking_input.query, ranking_json)
 
         # Optional token counting
         input_token_count = None
         if getattr(config, "RERANK_LOG_TOKEN_USAGE", False):
-            ct = self.client.models.count_tokens(
-                model=self.model_name,
-                contents=[prompt]
-            )
-            if hasattr(ct, "total_tokens"):
-                input_token_count = ct.total_tokens
+            input_token_count = self.llm.count_tokens(prompt)
 
+        response = None
+        parsed: Optional[RankingOutput] = None
         try:
-            # Use Gemini's structured output with Pydantic schema
-            resp = self.client.models.generate_content(
-                model=self.model_name,
-                contents=[prompt],
-                config=types.GenerateContentConfig(
-                    temperature=0.2,
-                    response_mime_type="application/json",
-                    response_schema=RankingOutput
-                )
-            )
-
-            # Parse the structured response
-            if resp and resp.text:
-                output = RankingOutput.model_validate_json(resp.text)
-                
-                # Filter to valid candidate IDs and build ordered list
-                ranked_ids = [
-                    v.id for v in output.ranked 
-                    if v.id in candidate_id_set
-                ]
-                
-                # Add any missing candidates at the end
-                leftover = [cid for cid in original_order if cid not in set(ranked_ids)]
+            response, parsed = self.llm.generate_json(prompt, RankingOutput)
+        except Exception as exc:
+            logger.warning("Reranking failed: %s", exc)
+            result["reason"] = "llm_error"
+        else:
+            if parsed:
+                ranked_ids = [vid.id for vid in parsed.ranked if vid.id in candidate_id_set]
+                leftover_set: Set[str] = set(ranked_ids)
+                leftover = [cid for cid in original_order if cid not in leftover_set]
                 final_ids = ranked_ids + leftover
-                
+
                 result["ordered_ids"] = final_ids
                 result["applied"] = True
                 result["reason"] = "success"
-                
-                # Include scores if present
-                llm_scores = {
-                    v.id: v.score for v in output.ranked 
-                    if v.score is not None and v.id in candidate_id_set
-                }
+
+                llm_scores = {vid.id: vid.score for vid in parsed.ranked if vid.score is not None and vid.id in candidate_id_set}
                 if llm_scores:
                     result["llm_scores"] = llm_scores
+            else:
+                result["reason"] = "parse_failed"
 
-        except Exception as e:
-            logger.warning("Reranking failed: %s", str(e))
-            result["reason"] = "parse_failed"
-
-        # Log token usage
-        log_token_usage(query_hash, resp if 'resp' in locals() else None, input_token_count)
+        # Token usage logging + optional metrics on response
+        log_usage(
+            f"RERANK_TOKENS query_hash={query_hash}",
+            response=response,
+            prompt_tokens=input_token_count,
+            logger=logger,
+            enabled=getattr(config, "RERANK_LOG_TOKEN_USAGE", False),
+        )
+        if response is not None:
+            usage = summarize_usage(response, input_token_count)
+            if any(val is not None for val in usage):
+                result["token_usage"] = {
+                    "input": usage[0],
+                    "output": usage[1],
+                    "total": usage[2],
+                }
 
         # Record latency
         result["latency_ms"] = int((time.time() - start) * 1000)
