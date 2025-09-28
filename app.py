@@ -6,9 +6,10 @@ Flask application - simplified and less defensive.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, Dict, List, Optional
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, request, send_from_directory
 
 from src.config import (
     DEFAULT_SEARCH_RESULTS,
@@ -30,6 +31,8 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 app = Flask(__name__)
+
+REACT_BUILD_DIR = os.path.join(app.static_folder, "react")
 
 
 def parse_int(value: Any, default: int, *, minimum: Optional[int] = None, maximum: Optional[int] = None) -> int:
@@ -94,13 +97,22 @@ def build_candidate_video(index: int, vid: str, meta: Dict[str, Any], distance: 
 
 @app.route("/")
 def index():
-    return render_template(
-        "index.html",
-        db_count=db_count,
-        collection_name=CHROMA_COLLECTION_NAME,
-        collection_empty=collection_empty,
-        default_results=DEFAULT_SEARCH_RESULTS,
-        embedding_model=EMBEDDING_MODEL_NAME,
+    index_path = os.path.join(REACT_BUILD_DIR, "index.html")
+    if not os.path.exists(index_path):
+        return jsonify({"error": "Frontend build not found. Run 'npm run build' inside the frontend directory."}), 500
+    return send_from_directory(REACT_BUILD_DIR, "index.html")
+
+
+@app.route("/app-config", methods=["GET"])
+def app_config():
+    return jsonify(
+        {
+            "db_count": db_count,
+            "collection_name": CHROMA_COLLECTION_NAME,
+            "collection_empty": collection_empty,
+            "default_results": DEFAULT_SEARCH_RESULTS,
+            "embedding_model": EMBEDDING_MODEL_NAME,
+        }
     )
 
 

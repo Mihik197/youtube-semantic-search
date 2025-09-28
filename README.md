@@ -13,7 +13,7 @@ A semantic search engine for your YouTube 'Watch Later' list. This project uses 
 -   **ChromaDB Integration:** Stores and efficiently searches through video embeddings.
 -   **YouTube Data API:** Fetches detailed video information (titles, descriptions, tags, channel).
 -   **Incremental Data Ingestion:** Processes your YouTube 'Watch Later' list from a CSV export, only adding new videos and pruning items that are no longer on the list.
--   **Web & CLI Interfaces:** Use the Flask UI or the streamlined terminal search tool.
+-   **Web & CLI Interfaces:** React single-page app powered by Flask APIs, plus a streamlined terminal search tool.
 -   **Topic & Channel Insights:** Built-in clustering and aggregation to explore your queue by theme or channel.
 -   **Optional LLM Re-Ranking:** (Gemini 2.5 Flash) Second-stage relevance ordering with JSON-only output and token usage logging.
 
@@ -41,8 +41,12 @@ The project is organized into a `src` directory containing the core application 
 ├── Watch later-videos.csv  # Your YouTube 'Watch Later' export (example)
 ├── chroma_watch_later_db/  # ChromaDB vector store
 ├── images/                 # Screenshots for README
-├── static/                 # Static assets for web interface (CSS, JS)
-└── templates/              # HTML templates for web interface
+├── frontend/               # React frontend (Vite + TypeScript)
+│   ├── src/                # Components, hooks, API helpers
+│   └── package.json        # Node dependencies and scripts
+├── static/
+│   └── react/              # Production build output from `npm run build`
+└── templates/              # Legacy Flask templates (kept for reference)
 ```
 
 ## Setup and Installation
@@ -64,13 +68,21 @@ The project is organized into a `src` directory containing the core application 
     source venv/bin/activate
     ```
 
-3.  **Install dependencies:**
+3.  **Install Python dependencies:**
 
     ```bash
     pip install -r requirements.txt
     ```
 
-4.  **Set up API Keys:**
+4.  **Install frontend dependencies:**
+
+    ```bash
+    cd frontend
+    npm install
+    cd ..
+    ```
+
+5.  **Set up API Keys:**
 
     -   Create a `.env` file in the root directory.
     -   Add your API keys to the `.env` file:
@@ -81,7 +93,7 @@ The project is organized into a `src` directory containing the core application 
     -   You can obtain a YouTube API key from the [Google Cloud Console](https://console.cloud.google.com/).
     -   You can obtain a Gemini API key from [Google AI Studio](https://aistudio.google.com/app/apikey).
 
-5.  **Prepare your YouTube Data:**
+6.  **Prepare your YouTube Data:**
     -   Export your 'Watch Later' list from YouTube. Typically, this can be done via [Google Takeout](https://takeout.google.com/). Ensure you get a CSV file.
     -   Place the CSV file in the root directory and make sure the filename matches the `TAKEOUT_CSV_FILE` variable in `src/config.py`.
 
@@ -97,13 +109,33 @@ The project is organized into a `src` directory containing the core application 
 2.  **Run the Search Application:**
     You can search your videos using either the web interface or the command-line tool.
 
-    **Option A: Web Interface**
-    Launch the Flask web application:
+    **Option A: Web Interface (React SPA)**
+
+    _Development (hot reload)_
 
     ```bash
+    # Terminal 1 - Flask API
     python app.py
     ```
-    This will start a local server, and you can access the search interface in your web browser at `http://127.0.0.1:5000`.
+
+    ```bash
+    # Terminal 2 - React dev server
+    cd frontend
+    npm run dev
+    ```
+
+    Vite serves the UI at `http://127.0.0.1:5173` and proxies API calls to Flask automatically.
+
+    _Production build (served by Flask)_
+
+    ```bash
+    cd frontend
+    npm run build
+    cd ..
+    python app.py
+    ```
+
+    After building, open `http://127.0.0.1:5000` and Flask will serve the precompiled assets from `static/react`.
 
     **Option B: Command-Line Interface (CLI)**
     Run the CLI application for a terminal-based search experience:
@@ -167,6 +199,8 @@ The main dependencies are listed in `requirements.txt`:
 -   `chromadb`: The vector database for storing and searching embeddings.
 -   `tqdm`: For displaying progress bars during data ingestion.
 -   `python-dotenv`: For managing environment variables (API keys).
+
+Frontend tooling lives in `frontend/package.json` and uses Vite, React 19, React Bootstrap, and @tanstack/react-query. Node.js 18+ (or the latest LTS release) is recommended.
 
 ## Contributing
 
