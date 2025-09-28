@@ -1,7 +1,9 @@
 # src/services/vectordb_service.py
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, Union
+
+from os import PathLike, fspath
 
 import chromadb
 
@@ -14,8 +16,8 @@ _BATCH_SIZE = max(1, getattr(config, "CHROMA_BATCH_SIZE", 100))
 class VectorDBService:
     """Lightweight wrapper around a Chroma persistent collection."""
 
-    def __init__(self, path: str, collection_name: str):
-        self.client = chromadb.PersistentClient(path=path)
+    def __init__(self, path: Union[str, PathLike[str]], collection_name: str):
+        self.client = chromadb.PersistentClient(path=fspath(path))
         self.collection = self.client.get_or_create_collection(
             name=collection_name,
             metadata={"hnsw:space": "cosine"},
@@ -73,8 +75,7 @@ class VectorDBService:
         offset = 0
         while offset < total:
             limit = min(batch_size, total - offset)
-            include = ["metadatas"] + (["ids"] if include_ids else [])
-            batch = self.collection.get(include=include, offset=offset, limit=limit)
+            batch = self.collection.get(include=["metadatas"], offset=offset, limit=limit)
             metadatas = batch.get("metadatas") or []
             ids = batch.get("ids") or []
             for idx, meta in enumerate(metadatas):
@@ -95,7 +96,7 @@ class VectorDBService:
         try:
             batch = self.collection.get(
                 where={"channel": channel},
-                include=["metadatas", "ids", "documents"],
+                include=["metadatas", "documents"],
                 limit=max(1, limit),
             )
         except Exception:
@@ -129,9 +130,15 @@ class VectorDBService:
                 include=["embeddings", "metadatas", "documents"],
             )
             got_ids = batch.get("ids") or []
-            embeddings = batch.get("embeddings") or []
-            metadatas = batch.get("metadatas") or []
-            documents = batch.get("documents") or []
+            embeddings = batch.get("embeddings")
+            if embeddings is None:
+                embeddings = []
+            metadatas = batch.get("metadatas")
+            if metadatas is None:
+                metadatas = []
+            documents = batch.get("documents")
+            if documents is None:
+                documents = []
             for idx, vid in enumerate(got_ids):
                 found[vid] = {
                     "embedding": embeddings[idx] if idx < len(embeddings) else None,

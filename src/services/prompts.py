@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from typing import Iterable, List, Tuple
 
-RERANK_SYSTEM_PROMPT = (
-    "You are a strict relevance ranking module. Given a user query and YouTube video "
-    "metadata, rank videos by relevance to the query. Return only the requested JSON "
-    "structure."
-)
+RERANK_SYSTEM_PROMPT = """
+    You are a strict relevance ranking module. 
+    Given a user query and YouTube video metadata, rank videos by relevance to the query. 
+    Return only the requested JSON structure.
+"""
 
 
 def build_rerank_prompt(query: str, ranking_json: str) -> str:
@@ -18,11 +18,11 @@ def build_rerank_prompt(query: str, ranking_json: str) -> str:
     )
 
 
-TOPIC_LABEL_PROMPT_HEADER = (
-    "You label clusters of YouTube videos. Respond with strict JSON only."
-    " Each cluster entry must contain: id (int), label (<=4 words), keywords"
-    " (<= {max_keywords}, lowercase). Keep labels specific and readable."
-)
+TOPIC_LABEL_PROMPT_HEADER = """
+    You label clusters of YouTube videos. Respond with strict JSON only.
+    Each cluster entry must contain: id (int), label (<=4 words), keywords
+    (<= {max_keywords}, lowercase). Keep labels specific and readable.
+"""
 
 
 def build_topic_label_prompt(

@@ -1,148 +1,151 @@
-# src/services/youtube_service.py
+from __future__ import annotations
+
+import logging
 import time
+from typing import Dict, Iterable, Iterator, List, Sequence
+
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-from tqdm import tqdm
+
 from src import config
 
+
+logger = logging.getLogger(__name__)
+
+
+def _chunk(sequence: Sequence[str], size: int) -> Iterator[List[str]]:
+    for start in range(0, len(sequence), size):
+        yield list(sequence[start : start + size])
+
+
 class YouTubeService:
-    """A service class for interacting with the YouTube Data API v3."""
+    """Thin wrapper around the YouTube Data API v3."""
 
     def __init__(self, api_key: str):
         if not api_key:
-            raise ValueError("YouTube API Key not provided.")
-        
-        print("Building YouTube service object...")
-        try:
-            self.youtube = build('youtube', 'v3', developerKey=api_key)
-            print("YouTube service object built successfully.")
-        except Exception as e:
-            print(f"Error building YouTube service object: {e}")
-            raise
+            raise ValueError("YouTube API key is required")
+        self.youtube = build("youtube", "v3", developerKey=api_key)
+        self.last_missing_ids: List[str] = []
 
-    def fetch_video_details(self, video_ids: list[str]) -> list[dict]:
+    # ------------------------------------------------------------------
+    # Video metadata
+    # ------------------------------------------------------------------
+    def fetch_video_details(self, video_ids: Sequence[str]) -> List[Dict]:
         if not video_ids:
+            self.last_missing_ids = []
             return []
 
-        all_video_details = []
-        processed_count = 0
-        error_count = 0
-        requested_id_set = set(video_ids)
-        self.last_missing_ids = []  # will populate at end for external diagnostics
+        batch_size = getattr(config, "YOUTUBE_API_BATCH_SIZE", 50)
+        delay = getattr(config, "YOUTUBE_API_DELAY", 0)
 
-        print(f"Fetching details for {len(video_ids)} YouTube video IDs...")
-
+        requested_ids = [vid for vid in video_ids if vid]
+        requested_set = set(requested_ids)
+        details: List[Dict] = []
         channel_ids: set[str] = set()
 
-        for i in tqdm(range(0, len(video_ids), config.YOUTUBE_API_BATCH_SIZE), desc="YouTube API Batches"):
-            batch_ids = video_ids[i:i + config.YOUTUBE_API_BATCH_SIZE]
-
+        for batch in _chunk(requested_ids, batch_size):
             try:
-                request = self.youtube.videos().list(
-                    part="snippet,contentDetails",
-                    id=",".join(batch_ids)
+                response = (
+                    self.youtube.videos()
+                    .list(part="snippet,contentDetails", id=",".join(batch))
+                    .execute()
                 )
-                response = request.execute()
+            except HttpError as error:
+                logger.warning("YouTube videos.list failed: %s", error)
+                if getattr(error, "resp", None) and getattr(error.resp, "status", None) in {403, 404}:
+                    break
+                continue
+            except Exception as error:  # pragma: no cover - network failures
+                logger.warning("Unexpected YouTube client error: %s", error)
+                continue
 
-                returned_ids_in_batch = set()
-                for item in response.get('items', []):
-                    snippet = item.get('snippet', {})
-                    content_details = item.get('contentDetails', {})
-                    video_id = item.get('id')
-                    channel_id = snippet.get('channelId') or None
-                    
-                    if video_id and snippet.get('title'):
-                        returned_ids_in_batch.add(video_id)
-                        if channel_id:
-                            channel_ids.add(channel_id)
-                        all_video_details.append({
-                            'id': video_id,
-                            'title': snippet.get('title'),
-                            'description': snippet.get('description', ''),
-                            'channel': snippet.get('channelTitle', ''),
-                            'channel_id': channel_id,
-                            'tags': snippet.get('tags', []),
-                            'publishedAt': snippet.get('publishedAt'),
-                            'duration': content_details.get('duration'),  # ISO 8601 duration
-                            'url': f'https://www.youtube.com/watch?v={video_id}'
-                        })
-                        processed_count += 1
-                    else:
-                        print(f"Warning: Skipping item with missing ID or Title. Data: {item}")
-                        error_count += 1
+            returned = set()
+            for item in response.get("items", []):
+                snippet = item.get("snippet", {})
+                content_details = item.get("contentDetails", {})
+                video_id = item.get("id")
+                title = snippet.get("title")
+                if not video_id or not title:
+                    logger.debug("Skipping malformed API item: %s", item)
+                    continue
 
-                # Detect IDs that were requested but not returned (private, deleted, invalid, region blocked, etc.)
-                missing_from_batch = set(batch_ids) - returned_ids_in_batch
-                if missing_from_batch:
-                    sample_list = list(missing_from_batch)[:5]
-                    print(f"Info: {len(missing_from_batch)} IDs in this batch not returned by API (possibly private/deleted/unavailable). Sample: {sample_list}")
-                
-                time.sleep(config.YOUTUBE_API_DELAY)
+                returned.add(video_id)
+                channel_id = snippet.get("channelId")
+                if channel_id:
+                    channel_ids.add(channel_id)
 
-            except HttpError as e:
-                print(f"\nHTTP Error fetching batch: {e}")
-                if e.resp.status in [403, 404]:
-                    print("Critical API Error (likely quota, invalid key, or permissions). Stopping YouTube fetch.")
-                    break 
-                error_count += len(batch_ids)
+                details.append(
+                    {
+                        "id": video_id,
+                        "title": title,
+                        "description": snippet.get("description", ""),
+                        "channel": snippet.get("channelTitle", ""),
+                        "channel_id": channel_id,
+                        "tags": snippet.get("tags", []),
+                        "publishedAt": snippet.get("publishedAt"),
+                        "duration": content_details.get("duration"),
+                        "url": f"https://www.youtube.com/watch?v={video_id}",
+                    }
+                )
 
-            except Exception as e:
-                print(f"\nUnexpected Error fetching batch: {e}")
-                error_count += len(batch_ids)
-        
-        # Compute missing IDs overall (those not returned at all)
-        returned_overall = {d['id'] for d in all_video_details}
-        total_missing = len(requested_id_set - returned_overall)
-        if total_missing > 0:
-            self.last_missing_ids = sorted(list(requested_id_set - returned_overall))
-            print(f"Summary: {total_missing} of {len(requested_id_set)} requested IDs not returned by API.")
-        else:
-            self.last_missing_ids = []
-        # Enrich with channel thumbnails (batch fetch)
-        try:
-            if channel_ids:
-                channel_thumb_map = self.fetch_channel_thumbnails(list(channel_ids))
-                for v in all_video_details:
-                    cid = v.get('channel_id')
-                    if cid and cid in channel_thumb_map:
-                        v['channel_thumbnail'] = channel_thumb_map[cid]
-        except Exception as enrich_e:
-            print(f"Warning: Failed to enrich channel thumbnails: {enrich_e}")
+            missing = set(batch) - returned
+            if missing:
+                logger.debug("%d IDs missing from batch", len(missing))
 
-        print(f"Finished fetching YouTube details. Processed: {processed_count}, Errors/Skipped: {error_count}")
-        return all_video_details
+            if delay:
+                time.sleep(delay)
 
-    def fetch_channel_thumbnails(self, channel_ids: list[str]) -> dict[str, str]:
-        """Fetch channel thumbnails for a list of channel IDs.
+        returned_ids = {video["id"] for video in details}
+        self.last_missing_ids = sorted(requested_set - returned_ids)
 
-        Uses channels.list (part=snippet). Returns mapping channelId -> thumbnail URL (prefers high > medium > default).
-        """
-        if not channel_ids:
+        if channel_ids:
+            thumbnails = self.fetch_channel_thumbnails(channel_ids)
+            for video in details:
+                channel_id = video.get("channel_id")
+                if channel_id and channel_id in thumbnails:
+                    video["channel_thumbnail"] = thumbnails[channel_id]
+
+        return details
+
+    # ------------------------------------------------------------------
+    # Channel helpers
+    # ------------------------------------------------------------------
+    def fetch_channel_thumbnails(self, channel_ids: Iterable[str]) -> Dict[str, str]:
+        ids = [cid for cid in dict.fromkeys(channel_ids) if cid]
+        if not ids:
             return {}
-        result: dict[str, str] = {}
-        # Deduplicate & batch
-        unique_ids = list(dict.fromkeys([cid for cid in channel_ids if cid]))
-        for i in range(0, len(unique_ids), config.YOUTUBE_API_BATCH_SIZE):
-            batch = unique_ids[i:i + config.YOUTUBE_API_BATCH_SIZE]
+
+        batch_size = getattr(config, "YOUTUBE_API_BATCH_SIZE", 50)
+        delay = getattr(config, "YOUTUBE_API_DELAY", 0)
+
+        thumbnails: Dict[str, str] = {}
+        for batch in _chunk(ids, batch_size):
             try:
-                request = self.youtube.channels().list(part="snippet", id=",".join(batch))
-                response = request.execute()
-                for item in response.get('items', []):
-                    cid = item.get('id')
-                    snippet = item.get('snippet', {})
-                    thumbs = (snippet.get('thumbnails') or {}) if isinstance(snippet, dict) else {}
-                    # Preferred order: high, medium, default
-                    thumb_url = None
-                    for key in ('high', 'medium', 'default'):
-                        if key in thumbs and isinstance(thumbs[key], dict):
-                            thumb_url = thumbs[key].get('url')
-                            if thumb_url:
-                                break
-                    if cid and thumb_url:
-                        result[cid] = thumb_url
-                time.sleep(config.YOUTUBE_API_DELAY)
-            except HttpError as e:
-                print(f"Channel thumbnails HTTP error: {e}")
-            except Exception as e:
-                print(f"Unexpected error fetching channel thumbnails: {e}")
-        return result
+                response = (
+                    self.youtube.channels()
+                    .list(part="snippet", id=",".join(batch))
+                    .execute()
+                )
+            except HttpError as error:
+                logger.warning("YouTube channels.list failed: %s", error)
+                continue
+            except Exception as error:  # pragma: no cover - network failures
+                logger.warning("Unexpected YouTube channel error: %s", error)
+                continue
+
+            for item in response.get("items", []):
+                channel_id = item.get("id")
+                if not channel_id:
+                    continue
+                thumbs = (item.get("snippet", {}) or {}).get("thumbnails", {})
+                for quality in ("high", "medium", "default"):
+                    candidate = thumbs.get(quality, {})
+                    url = candidate.get("url") if isinstance(candidate, dict) else None
+                    if url:
+                        thumbnails[channel_id] = url
+                        break
+
+            if delay:
+                time.sleep(delay)
+
+        return thumbnails
