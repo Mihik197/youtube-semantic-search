@@ -1,0 +1,12 @@
+{% macro skeletons(class_name, count) -%}
+	{% for _ in range(count) %}
+		<div class="{{ class_name }}"></div>
+	{% endfor %}
+{%- endmacro %}
+
+{% macro pill_badge(text, extra_classes='', id=None) -%}
+	{% set extras = extra_classes | trim %}
+	<span {% if id %}id="{{ id }}"{% endif %} class="badge rounded-pill{% if extras %} {{ extras }}{% endif %}">
+		{{ text }}
+	</span>
+{%- endmacro %}

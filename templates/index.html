@@ -1,3 +1,4 @@
+{% from "macros/ui.html" import skeletons, pill_badge %}
 <!DOCTYPE html>
 <html lang="en" data-bs-theme="light">
 	<head>
@@ -75,11 +76,7 @@
 								<input type="text" class="form-control form-control-sm" id="channelSearchInput" placeholder="Search channels..." aria-label="Filter channels by name" />
 							</div>
 							<div id="channelsLoading" class="channel-skeleton-list">
-								<div class="channel-skeleton"></div>
-								<div class="channel-skeleton"></div>
-								<div class="channel-skeleton"></div>
-								<div class="channel-skeleton"></div>
-								<div class="channel-skeleton"></div>
+								{{ skeletons('channel-skeleton', 5) }}
 							</div>
 							<div id="channelsError" class="alert alert-danger d-none small" role="alert">
 								Failed to load channels.
@@ -104,9 +101,7 @@
 								<label class="form-check-label small" for="toggleNoiseTopics">Show noise</label>
 							</div>
 							<div id="topicsLoading" class="topic-skeleton-list d-none">
-								<div class="topic-skeleton"></div>
-								<div class="topic-skeleton"></div>
-								<div class="topic-skeleton"></div>
+								{{ skeletons('topic-skeleton', 3) }}
 							</div>
 							<div id="topicsError" class="alert alert-danger d-none small" role="alert">Failed to load topics.</div>
 							<ul class="list-unstyled topic-list d-none" id="topicList" role="list" aria-label="Topics list"></ul>
@@ -123,10 +118,7 @@
 										><i class="bi bi-database-fill"></i>
 										Database Status</span
 									>
-									<span
-										class="badge {% if collection_empty %}bg-warning text-dark{% else %}bg-white text-success{% endif %} rounded-pill"
-										>{{ db_count }} videos</span
-									>
+									{{ pill_badge(db_count ~ ' videos', ("bg-warning text-dark" if collection_empty else "bg-white text-success")) }}
 								</div>
 								<div
 									class="small {% if collection_empty %}text-dark{% else %}text-white{% endif %} opacity-75"
@@ -248,10 +240,7 @@
 								class="d-flex justify-content-between align-items-center mb-4"
 							>
 								<h2 class="mb-0" id="resultsHeader">Search Results</h2>
-								<span
-									id="resultCount"
-									class="badge rounded-pill bg-secondary-subtle text-secondary-emphasis"
-								></span>
+								{{ pill_badge('', 'bg-secondary-subtle text-secondary-emphasis', 'resultCount') }}
 							</div>
 							<div
 								id="resultsContainer"
@@ -438,6 +427,6 @@
 		</div>
 
 		<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.7/dist/js/bootstrap.bundle.min.js"></script>
-		<script src="{{ url_for('static', filename='js/scripts.js') }}"></script>
+		<script type="module" src="{{ url_for('static', filename='js/app.js') }}"></script>
 	</body>
 </html>
