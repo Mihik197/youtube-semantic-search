@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set
 
 import pandas as pd
@@ -44,25 +45,36 @@ class DataIngestionPipeline:
             return False
         print(f"Found {len(csv_ids)} unique video IDs in the CSV file.")
 
-        existing_ids = set(self.vectordb_service.get_all_ids())
-        print(f"Found {len(existing_ids)} existing video IDs in the database.")
+        existing_records = self.vectordb_service.get_all_metadatas(include_ids=True, include_deleted=True)
+        existing_ids = {row.get("id") for row in existing_records if row.get("id")}
+        deleted_ids = {row.get("id") for row in existing_records if row.get("id") and row.get("is_deleted") is True}
+        active_existing_ids = existing_ids - deleted_ids
+
+        print(f"Found {len(existing_ids)} existing video IDs in the database ({len(active_existing_ids)} active, {len(deleted_ids)} deleted).")
 
         new_ids = sorted(csv_ids - existing_ids)
-        removed_ids = sorted(existing_ids - csv_ids)
-        print(f"Found {len(new_ids)} new videos to add.")
-        print(f"Found {len(removed_ids)} videos to remove.")
+        restore_ids = sorted(csv_ids & deleted_ids)
+        removed_ids = sorted(active_existing_ids - csv_ids)
+        print(f"Found {len(new_ids)} brand-new videos to add.")
+        print(f"Found {len(restore_ids)} previously removed videos to restore.")
+        print(f"Found {len(removed_ids)} videos to mark as removed.")
 
         if new_ids:
             self._ingest_new_videos(new_ids)
         else:
             print("No new videos to process.")
 
-        if removed_ids:
-            self._remove_videos(removed_ids)
+        if restore_ids:
+            self._restore_videos(restore_ids)
         else:
-            print("No old videos to remove.")
+            print("No previously removed videos to restore.")
 
-        total = self.vectordb_service.count()
+        if removed_ids:
+            self._mark_videos_deleted(removed_ids)
+        else:
+            print("No videos to mark as removed.")
+
+        total = self.vectordb_service.count_active()
         print("\n--- Ingestion process finished. ---")
         print(f"Total videos in database: {total}")
         return True
@@ -203,6 +215,7 @@ class DataIngestionPipeline:
 
     def _prepare_metadata(self, metadata: Dict[str, Any]) -> Dict[str, Any]:
         meta = dict(metadata)
+        meta["is_deleted"] = False
         duration = parse_iso8601_duration(meta.get("duration"))
         if duration is not None:
             meta["duration_seconds"] = int(duration)
@@ -217,7 +230,66 @@ class DataIngestionPipeline:
     # ------------------------------------------------------------------
     # Deletion
     # ------------------------------------------------------------------
-    def _remove_videos(self, video_ids: Sequence[str]) -> None:
-        print("\n--- Phase: Removing old videos ---")
-        self.vectordb_service.delete(ids=list(video_ids))
-        print(f"Removed {len(video_ids)} old videos from the database.")
+    def _mark_videos_deleted(self, video_ids: Sequence[str]) -> None:
+        print("\n--- Phase: Marking videos as removed (soft delete) ---")
+        items = self.vectordb_service.get_items(video_ids)
+        now = datetime.now(timezone.utc).isoformat()
+        upsert_embeddings: List[List[float]] = []
+        upsert_ids: List[str] = []
+        upsert_metadatas: List[Dict[str, Any]] = []
+        upsert_documents: List[str] = []
+
+        for vid, item in items.items():
+            embedding = item.get("embedding")
+            if embedding is None or (hasattr(embedding, "__len__") and len(embedding) == 0):
+                continue
+            meta = item.get("metadata") or {}
+            if not isinstance(meta, dict):
+                meta = {}
+            meta = dict(meta)
+            meta["is_deleted"] = True
+            meta["deleted_at"] = now
+            meta["deleted_reason"] = "removed_from_csv"
+            upsert_embeddings.append(embedding)
+            upsert_ids.append(vid)
+            upsert_metadatas.append(meta)
+            upsert_documents.append(item.get("document") or "")
+
+        if not upsert_ids:
+            print("No matching existing items found to mark as deleted.")
+            return
+
+        self.vectordb_service.upsert_documents(upsert_embeddings, upsert_ids, upsert_metadatas, upsert_documents)
+        print(f"Marked {len(upsert_ids)} videos as removed (kept in DB).")
+
+    def _restore_videos(self, video_ids: Sequence[str]) -> None:
+        print("\n--- Phase: Restoring previously removed videos ---")
+        items = self.vectordb_service.get_items(video_ids)
+        now = datetime.now(timezone.utc).isoformat()
+        upsert_embeddings: List[List[float]] = []
+        upsert_ids: List[str] = []
+        upsert_metadatas: List[Dict[str, Any]] = []
+        upsert_documents: List[str] = []
+
+        for vid, item in items.items():
+            embedding = item.get("embedding")
+            if embedding is None or (hasattr(embedding, "__len__") and len(embedding) == 0):
+                continue
+            meta = item.get("metadata") or {}
+            if not isinstance(meta, dict):
+                meta = {}
+            meta = dict(meta)
+            meta["is_deleted"] = False
+            meta["restored_at"] = now
+            meta.pop("deleted_reason", None)
+            upsert_embeddings.append(embedding)
+            upsert_ids.append(vid)
+            upsert_metadatas.append(meta)
+            upsert_documents.append(item.get("document") or "")
+
+        if not upsert_ids:
+            print("No matching existing items found to restore.")
+            return
+
+        self.vectordb_service.upsert_documents(upsert_embeddings, upsert_ids, upsert_metadatas, upsert_documents)
+        print(f"Restored {len(upsert_ids)} videos.")

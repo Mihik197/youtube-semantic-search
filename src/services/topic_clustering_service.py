@@ -66,7 +66,7 @@ class TopicClusteringService:
         if not getattr(config, "TOPIC_CLUSTERING_ENABLE_LLM_LABELS", False):
             self._llm_init_failed = True
             return None
-        model = getattr(config, "TOPIC_CLUSTERING_LLM_MODEL", "gemini-2.5-flash")
+        model = getattr(config, "TOPIC_CLUSTERING_LLM_MODEL", "gemini-2.5-flash-lite")
         temperature = getattr(config, "TOPIC_CLUSTERING_LLM_TEMPERATURE", 0.2)
         api_key = getattr(config, "GEMINI_API_KEY", "")
         try:
@@ -104,7 +104,7 @@ class TopicClusteringService:
             stored_total = int(snapshot.get("total_videos", -1))
         except (TypeError, ValueError):
             stored_total = -1
-        return stored_total != self.vectordb.count()
+        return stored_total != self.vectordb.count_active()
 
     # ------------------------------------------------------------------
     # Embedding extraction and preprocessing
@@ -127,15 +127,25 @@ class TopicClusteringService:
                 offset=offset,
                 limit=limit,
             )
-            batch_ids = list(batch.get("ids") or [])
-            embeddings = list(batch.get("embeddings") or [])
-            metadatas = list(batch.get("metadatas") or [])
+            raw_ids = batch.get("ids")
+            raw_embeddings = batch.get("embeddings")
+            raw_metadatas = batch.get("metadatas")
+
+            batch_ids = list(raw_ids) if raw_ids is not None else []
+            embeddings = list(raw_embeddings) if raw_embeddings is not None else []
+            metadatas = list(raw_metadatas) if raw_metadatas is not None else []
 
             for idx, vid in enumerate(batch_ids):
-                ids.append(vid)
-                vector = embeddings[idx] if idx < len(embeddings) else []
-                vectors.append(vector or [0.0])
                 meta = metadatas[idx] if idx < len(metadatas) and isinstance(metadatas[idx], dict) else {}
+                if isinstance(meta, dict) and meta.get("is_deleted") is True:
+                    continue
+
+                ids.append(vid)
+                vector = embeddings[idx] if idx < len(embeddings) else None
+                if vector is None or (hasattr(vector, "__len__") and len(vector) == 0):
+                    vectors.append([0.0])
+                else:
+                    vectors.append(list(vector))
                 title = (meta.get("title") or "").strip()
                 channel = (meta.get("channel") or "").strip()
                 description = (meta.get("description") or "")[:200].strip()
@@ -300,7 +310,7 @@ class TopicClusteringService:
         for start in range(0, len(items), chunk_size):
             chunk = items[start : start + chunk_size]
             cluster_payload = [
-                (cid, list(data.get("texts", []) or []))
+                (cid, list(data.get("texts") or []))
                 for cid, data in chunk
             ]
             prompt = build_topic_label_prompt(cluster_payload, max_keywords=max_keywords)

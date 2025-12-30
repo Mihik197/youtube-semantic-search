@@ -12,7 +12,7 @@ def run_search_cli() -> None:
         return
 
     vectordb = VectorDBService(path=CHROMA_DB_PATH, collection_name=CHROMA_COLLECTION_NAME)
-    db_count = vectordb.count()
+    db_count = vectordb.count_active()
     print(f"Database contains {db_count} items.")
     if db_count == 0:
         print("Warning: The database is empty. Run `python ingest_data.py` first.")

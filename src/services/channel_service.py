@@ -30,7 +30,7 @@ class ChannelAggregationService:
 
     def _build_cache(self) -> None:
         start = time.perf_counter()
-        total = self.vectordb.count()
+        total = self.vectordb.count_active()
         if self._cache and self._cache_total == total:
             return
 

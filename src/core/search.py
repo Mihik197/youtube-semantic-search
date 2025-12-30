@@ -10,6 +10,10 @@ from src.services.embedding_service import EmbeddingService
 from src.services.vectordb_service import VectorDBService
 
 
+def _is_deleted(meta) -> bool:
+    return isinstance(meta, dict) and meta.get("is_deleted") is True
+
+
 def search_videos(query: str, n_results: int = DEFAULT_SEARCH_RESULTS):
     """Perform a semantic search and return the raw Chroma response."""
     query = (query or "").strip()
@@ -23,4 +27,24 @@ def search_videos(query: str, n_results: int = DEFAULT_SEARCH_RESULTS):
     if not query_embedding:
         return None
 
-    return vectordb_service.query(query_embedding=query_embedding, n_results=n_results)
+    n_results = max(1, int(n_results or DEFAULT_SEARCH_RESULTS))
+    fetch_n = min(max(n_results * 4, n_results), 200)
+    raw = vectordb_service.query(query_embedding=query_embedding, n_results=fetch_n) or {}
+
+    ids = (raw.get("ids") or [[]])[0]
+    if not ids:
+        return raw
+
+    distances = (raw.get("distances") or [[]])[0]
+    metadatas = (raw.get("metadatas") or [[]])[0]
+    documents = (raw.get("documents") or [[]])[0]
+
+    keep = [idx for idx, meta in enumerate(metadatas) if not _is_deleted(meta)][:n_results]
+
+    return {
+        **raw,
+        "ids": [[ids[i] for i in keep]],
+        "distances": [[distances[i] for i in keep if i < len(distances)]],
+        "metadatas": [[metadatas[i] for i in keep]],
+        "documents": [[documents[i] for i in keep if i < len(documents)]],
+    }

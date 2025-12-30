@@ -16,6 +16,10 @@ _BATCH_SIZE = max(1, getattr(config, "CHROMA_BATCH_SIZE", 100))
 class VectorDBService:
     """Lightweight wrapper around a Chroma persistent collection."""
 
+    @staticmethod
+    def _is_deleted_metadata(meta: Any) -> bool:
+        return isinstance(meta, dict) and meta.get("is_deleted") is True
+
     def __init__(self, path: Union[str, PathLike[str]], collection_name: str):
         self.client = chromadb.PersistentClient(path=fspath(path))
         self.collection = self.client.get_or_create_collection(
@@ -66,7 +70,13 @@ class VectorDBService:
     def count(self) -> int:
         return int(self.collection.count())
 
-    def get_all_metadatas(self, batch_size: int = 1000, include_ids: bool = True) -> List[Dict[str, Any]]:
+    def get_all_metadatas(
+        self,
+        batch_size: int = 1000,
+        include_ids: bool = True,
+        *,
+        include_deleted: bool = False,
+    ) -> List[Dict[str, Any]]:
         total = self.count()
         if total == 0:
             return []
@@ -81,6 +91,8 @@ class VectorDBService:
             for idx, meta in enumerate(metadatas):
                 if not isinstance(meta, dict):
                     continue
+                if not include_deleted and self._is_deleted_metadata(meta):
+                    continue
                 record = dict(meta)
                 if include_ids and idx < len(ids):
                     record.setdefault("id", ids[idx])
@@ -89,6 +101,27 @@ class VectorDBService:
                 break
             offset += len(metadatas)
         return collected
+
+    def count_active(self, batch_size: int = 2000) -> int:
+        """Counts only records that are not marked as deleted."""
+        total = self.count()
+        if total == 0:
+            return 0
+        batch_size = max(1, batch_size)
+        offset = 0
+        active = 0
+        while offset < total:
+            limit = min(batch_size, total - offset)
+            batch = self.collection.get(include=["metadatas"], offset=offset, limit=limit)
+            metadatas = batch.get("metadatas") or []
+            if not metadatas:
+                break
+            for meta in metadatas:
+                if self._is_deleted_metadata(meta):
+                    continue
+                active += 1
+            offset += len(metadatas)
+        return active
 
     def get_videos_by_channel(self, channel: str, limit: int = 500) -> List[Dict[str, Any]]:
         if not channel:
@@ -109,6 +142,8 @@ class VectorDBService:
         videos: List[Dict[str, Any]] = []
         for idx, meta in enumerate(metadatas):
             if not isinstance(meta, dict):
+                continue
+            if self._is_deleted_metadata(meta):
                 continue
             record = dict(meta)
             if idx < len(ids):

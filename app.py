@@ -55,7 +55,7 @@ def cosine_distance_to_similarity(distance: Optional[float]) -> float:
 
 # Initialize VectorDBService at startup — let any genuine errors surface early.
 vectordb_service = VectorDBService(path=CHROMA_DB_PATH, collection_name=CHROMA_COLLECTION_NAME)
-db_count = vectordb_service.count()
+db_count = vectordb_service.count_active()
 collection_empty = (db_count == 0)
 
 
